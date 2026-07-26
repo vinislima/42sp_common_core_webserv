@@ -23,6 +23,8 @@ private:
     void    _buildTree();
     void    _parseListen(ServerConfig& server, size_t& i);
     void    _parseServerName(ServerConfig& server, size_t& i);
+    void    _parseErrorPage(ServerConfig& server, size_t& i);
+    void    _parseClientMaxBodySize(ServerConfig& server, size_t& i);
 
 public:
     // Forma Canônica Ortodoxa

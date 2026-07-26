@@ -92,6 +92,12 @@ void ConfigParser::_buildTree() {
                 else if (_tokens[i] == "server_name") {
                     _parseServerName(newServer, i);
                 }
+                else if (_tokens[i] == "error_page") {
+                    _parseErrorPage(newServer, i);
+                }
+                else if (_tokens[i] == "client_max_body_size") {
+                    _parseClientMaxBodySize(newServer, i);
+                }
                 else {
                     // Por enquanto ignoramos outras diretivas (root, error_page)
                     i++;
@@ -150,6 +156,78 @@ void ConfigParser::_parseServerName(ServerConfig& server, size_t& i) {
 
     if (i >= _tokens.size() || _tokens[i] != ";") {
          throw std::runtime_error("Erro: Diretiva server_name sem ponto e vírgula ';'");
+    }
+}
+
+void ConfigParser::_parseErrorPage(ServerConfig& server, size_t& i) {
+    i++; // Pula "error_page"
+    std::vector<int> codes;
+    
+    while (i < _tokens.size() && _tokens[i] != ";") {
+        // Checa se o token atual é composto só por dígitos (é um código de erro)
+        bool isNumber = true;
+        for (size_t j = 0; j < _tokens[i].length(); ++j) {
+            if (!std::isdigit(_tokens[i][j])) {
+                isNumber = false;
+                break;
+            }
+        }
+        
+        if (isNumber) {
+            codes.push_back(std::atoi(_tokens[i].c_str()));
+        } else {
+            // Se não é número, deve ser a string da URI (ex: "/50x.html")
+            // Então associamos esse arquivo a todos os códigos acumulados
+            std::string uri = _tokens[i];
+            for (size_t j = 0; j < codes.size(); ++j) {
+                server.addErrorPage(codes[j], uri);
+            }
+        }
+        i++;
+    }
+    
+    if (i >= _tokens.size() || _tokens[i] != ";") {
+        throw std::runtime_error("Erro: Diretiva error_page sem ponto e vírgula ';'");
+    }
+}
+
+void ConfigParser::_parseClientMaxBodySize(ServerConfig& server, size_t& i) {
+    i++; // Pula "client_max_body_size"
+    if (i >= _tokens.size() || _tokens[i] == ";") {
+         throw std::runtime_error("Erro: Diretiva client_max_body_size vazia");
+    }
+    
+    std::string val = _tokens[i];
+    size_t multiplier = 1;
+    char lastChar = val[val.length() - 1];
+    
+    // Aceita sufixos de tamanho do NGINX
+    if (lastChar == 'm' || lastChar == 'M') {
+        multiplier = 1024 * 1024;
+        val = val.substr(0, val.length() - 1);
+    } else if (lastChar == 'k' || lastChar == 'K') {
+        multiplier = 1024;
+        val = val.substr(0, val.length() - 1);
+    } else if (lastChar == 'g' || lastChar == 'G') {
+        multiplier = 1024 * 1024 * 1024;
+        val = val.substr(0, val.length() - 1);
+    }
+    
+    // Verifica se sobrou apenas números
+    for (size_t j = 0; j < val.length(); ++j) {
+        if (!std::isdigit(val[j])) {
+            throw std::runtime_error("Erro: Valor inválido em client_max_body_size");
+        }
+    }
+    
+    std::stringstream ss(val);
+    size_t size;
+    ss >> size;
+    server.setClientMaxBodySize(size * multiplier);
+    
+    i++; // Pula o valor
+    if (i >= _tokens.size() || _tokens[i] != ";") {
+         throw std::runtime_error("Erro: Diretiva client_max_body_size sem ponto e vírgula ';'");
     }
 }
 

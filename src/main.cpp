@@ -23,6 +23,16 @@ int main(int argc, char **argv) {
             for (size_t j = 0; j < names.size(); ++j) {
                 std::cout << names[j] << " ";
             }
+            std::cout << "\n";
+            
+            std::cout << "  -> Client Max Body: " << servers[i].getClientMaxBodySize() << " bytes\n";
+            
+            std::map<int, std::string> errors = servers[i].getErrorPages();
+            std::cout << "  -> Error Pages: \n";
+            for (std::map<int, std::string>::iterator it = errors.begin(); it != errors.end(); ++it) {
+                std::cout << "     * " << it->first << " => " << it->second << "\n";
+            }
+            
             std::cout << "\n\n";
         }
         

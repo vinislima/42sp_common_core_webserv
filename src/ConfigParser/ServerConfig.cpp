@@ -15,6 +15,8 @@ ServerConfig& ServerConfig::operator=(const ServerConfig& rhs) {
         this->_host = rhs._host;
         this->_port = rhs._port;
         this->_serverNames = rhs._serverNames;
+		this->_errorPages = rhs._errorPages;
+        this->_clientMaxBodySize = rhs._clientMaxBodySize;
     }
     return *this;
 }
@@ -37,6 +39,14 @@ void ServerConfig::addServerName(const std::string& name) {
     this->_serverNames.push_back(name);
 }
 
+void ServerConfig::addErrorPage(int code, const std::string& uri) {
+    this->_errorPages[code] = uri;
+}
+
+void ServerConfig::setClientMaxBodySize(size_t size) {
+    this->_clientMaxBodySize = size;
+}
+
 // =============================================================================
 // Getters
 // =============================================================================
@@ -51,4 +61,12 @@ int ServerConfig::getPort() const {
 
 std::vector<std::string> ServerConfig::getServerNames() const {
     return this->_serverNames;
+}
+
+std::map<int, std::string> ServerConfig::getErrorPages() const {
+    return this->_errorPages;
+}
+
+size_t ServerConfig::getClientMaxBodySize() const {
+    return this->_clientMaxBodySize;
 }
