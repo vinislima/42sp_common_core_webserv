@@ -1,10 +1,7 @@
 #include "../../inc/ServerConfig.hpp"
 
-// =============================================================================
-// Construtores e Destrutor (Forma Canônica)
-// =============================================================================
 
-ServerConfig::ServerConfig() : _host("0.0.0.0"), _port(80) {}
+ServerConfig::ServerConfig() : _host("0.0.0.0"), _port(80), _clientMaxBodySize(1048576), _root(""), _autoindex(false) {}
 
 ServerConfig::ServerConfig(const ServerConfig& src) {
     *this = src;
@@ -15,17 +12,17 @@ ServerConfig& ServerConfig::operator=(const ServerConfig& rhs) {
         this->_host = rhs._host;
         this->_port = rhs._port;
         this->_serverNames = rhs._serverNames;
-		this->_errorPages = rhs._errorPages;
+        this->_errorPages = rhs._errorPages;
         this->_clientMaxBodySize = rhs._clientMaxBodySize;
+        this->_root = rhs._root;
+        this->_autoindex = rhs._autoindex;
+        this->_index = rhs._index;
+        this->_locations = rhs._locations;
     }
     return *this;
 }
 
 ServerConfig::~ServerConfig() {}
-
-// =============================================================================
-// Setters
-// =============================================================================
 
 void ServerConfig::setHost(const std::string& host) {
     this->_host = host;
@@ -47,9 +44,21 @@ void ServerConfig::setClientMaxBodySize(size_t size) {
     this->_clientMaxBodySize = size;
 }
 
-// =============================================================================
-// Getters
-// =============================================================================
+void ServerConfig::setRoot(const std::string& root) {
+    this->_root = root;
+}
+
+void ServerConfig::setAutoindex(bool autoindex) {
+    this->_autoindex = autoindex;
+}
+
+void ServerConfig::addIndex(const std::string& index) {
+    this->_index.push_back(index);
+}
+
+void ServerConfig::addLocation(const LocationConfig& location) {
+    this->_locations.push_back(location);
+}
 
 std::string ServerConfig::getHost() const {
     return this->_host;
@@ -69,4 +78,20 @@ std::map<int, std::string> ServerConfig::getErrorPages() const {
 
 size_t ServerConfig::getClientMaxBodySize() const {
     return this->_clientMaxBodySize;
+}
+
+std::string ServerConfig::getRoot() const {
+    return this->_root;
+}
+
+bool ServerConfig::getAutoindex() const {
+    return this->_autoindex;
+}
+
+std::vector<std::string> ServerConfig::getIndex() const {
+    return this->_index;
+}
+
+std::vector<LocationConfig> ServerConfig::getLocations() const {
+    return this->_locations;
 }

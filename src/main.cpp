@@ -1,4 +1,5 @@
 #include "../inc/ConfigParser.hpp"
+#include "../inc/Server.hpp" 
 #include <iostream>
 
 int main(int argc, char **argv) {
@@ -7,34 +8,10 @@ int main(int argc, char **argv) {
     try {
         ConfigParser parser(configFile);
         parser.parse();
+        std::vector<ServerConfig> configs = parser.getServers();
         
-        // Pega a lista de servidores em vez dos tokens crus
-        std::vector<ServerConfig> servers = parser.getServers();
-        
-        std::cout << "--- SERVIDORES CONFIGURADOS ---\n\n";
-        
-        for (size_t i = 0; i < servers.size(); ++i) {
-            std::cout << "[Servidor " << i + 1 << "]\n";
-            std::cout << "  -> Host:  " << servers[i].getHost() << "\n";
-            std::cout << "  -> Porta: " << servers[i].getPort() << "\n";
-            
-            std::cout << "  -> Nomes: ";
-            std::vector<std::string> names = servers[i].getServerNames();
-            for (size_t j = 0; j < names.size(); ++j) {
-                std::cout << names[j] << " ";
-            }
-            std::cout << "\n";
-            
-            std::cout << "  -> Client Max Body: " << servers[i].getClientMaxBodySize() << " bytes\n";
-            
-            std::map<int, std::string> errors = servers[i].getErrorPages();
-            std::cout << "  -> Error Pages: \n";
-            for (std::map<int, std::string>::iterator it = errors.begin(); it != errors.end(); ++it) {
-                std::cout << "     * " << it->first << " => " << it->second << "\n";
-            }
-            
-            std::cout << "\n\n";
-        }
+        Server webServer(configs);
+        webServer.start();
         
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';
