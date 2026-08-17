@@ -7,7 +7,7 @@
 #include <dirent.h>
 
 Response::Response() : _statusCode(200) {
-	_initStatusMessages()
+	_initStatusMessages();
 }
 
 Response::~Response() {}
@@ -16,7 +16,7 @@ void Response::_initStatusMessages() {
 	_statusCode[200] = "OK";
 	_statusCode[201] = "Created";
 	_statusCode[204] = "No Content";
-	_statusCode[301] = "Moved Permanently"
+	_statusCode[301] = "Moved Permanently";
 	_statusCode[400] = "Bad Request";
 	_statusCode[403] = "Forbidden";
 	_statusCode[404] = "Not Found";
@@ -84,14 +84,14 @@ void Response::build(const Request& req) {
 		std::string filepath = "./www/" + req.getUri();
 
 		if (filepath != "./www/" && filepath[filepath.length() - 1] == '/') {
-			filepath = filepath.substr(0, filepath.length() - 1)
+			filepath = filepath.substr(0, filepath.length() - 1);
 		}
 
 		struct stat path_stat;
 		if (stat(filepath.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
 			std::string indexPath = filepath + "/index.html";
 
-			if (acess(indexPath.c_str(), F_OK) == 0) {
+			if (access(indexPath.c_str(), F_OK) == 0) {
 				filepath = indexPath;
 			} else {
 				DIR* dir = opendir(filepath.c_str());
@@ -100,7 +100,7 @@ void Response::build(const Request& req) {
 					autoindexHtml += "<body style=\"font-family: monospace; background-color: #282a36; color: #f8f8f2; padding: 20px;\">";
 					autoindexHtml += "<h1 style=\"color: #50fa7b;\">Index of " + req.getUri() + "</h1><hr><ul>";
 
-					struct diferent* entry;
+					struct dirent* entry;
 					while ((entry = readdir(dir)) != NULL) {
 						std::string name = entry->d_name;
 						if (name == ".")
@@ -115,7 +115,7 @@ void Response::build(const Request& req) {
 						if (stat(fullPath.c_str(), &item_stat) == 0 && S_ISDIR(item_stat.st_mode)) {
 							name += "/";
 						}
-						autoindexHtml += "<li style=\"margin: 5px 0;\"><a style=\"color: #8be9fd; text-decoration: none; font-size: 1.2rem;\" href=\"" + link + "\">" + name + "</a></li>"
+						autoindexHtml += "<li style=\"margin: 5px 0;\"><a style=\"color: #8be9fd; text-decoration: none; font-size: 1.2rem;\" href=\"" + link + "\">" + name + "</a></li>";
 					}
 					closedir(dir);
 					autoindexHtml += "</ul><hr><p style=\"color: #6272a4;\">Webserv / C++98</p></body></html>";
@@ -140,9 +140,53 @@ void Response::build(const Request& req) {
 		} else {
 			setStatusCode(404);
 			setBody("<html><body><h1 style='color:red;'>404 - Pagina Nao Encontrada (Not Found)</h1></body></html>");
-			setHeader("Content-Type", "text/htl")
+			setHeader("Content-Type", "text/htl");
 		}
 	}
+	else if (req.getMethod() == "POST") {
+		std::string filepath = "./www" + req.getUri();
+		if (req.getUri() == "/")
+			filepath = "./www/upload_generico.txt";
+
+		std::ofstream outFile(filepath.c_str(), std::ios::out | std::ios::binary);
+		if (outFile.is_open()) {
+			outFile.write(req.getBody().c_str(), req.getBody().length());
+			outFile.close();
+
+			setStatusCode(201);
+			setBody("<html><body><h1 style='color:green'>201 - Arquivo Criado com Sucesso!</h1></body></html>");
+			setHeader("Content-Type", "text/html");
+		} else {
+			setStatusCode(500);
+			setBody("<html><body><h1 style='color:red'>500 - Erro Interno</h1></body></html>");
+			setHeader("Content-Type", "text/html");
+		}
+	}
+	else if (req.getMethod() == "DELETE") {
+		std::string filepath = "./www" + req.getUri();
+
+		if (access(filepath.c_str(), F_OK) != 0) {
+			setStatusCode(404);
+			setBody("<html><body><h1 style='color:red'>404 - Not Found</h1></body></html>");
+			setHeader("Content-Type", "text/html");
+		}
+		else if (std::remove(filepath.c_str()) == 0) {
+			setStatusCode(200);
+			setBody("<html><body><h1 style='color:green'>200 - OK (Deletado)</h1></body></html>");
+			setHeader("Content-Type", "text/html");
+		}
+		else {
+			setStatusCode(403);
+			setBody("<html><body><h1 style='color:red'>403 - Forbidden</h1></body></html>");
+			setHeader("Content-Type", "text/html");
+		}
+	}
+	else {
+		setStatusCode(405);
+		setBody("<html><body><h1>405 - Metodo Nao Permitido</h1></body></html>");
+		setHeader("Content-Type", "text/html");
+	}
+	_generateRawResponse();
 }
 
 std::string Response::getRawResponse() const {
