@@ -13,17 +13,17 @@ Response::Response() : _statusCode(200) {
 Response::~Response() {}
 
 void Response::_initStatusMessages() {
-	_statusCode[200] = "OK";
-	_statusCode[201] = "Created";
-	_statusCode[204] = "No Content";
-	_statusCode[301] = "Moved Permanently";
-	_statusCode[400] = "Bad Request";
-	_statusCode[403] = "Forbidden";
-	_statusCode[404] = "Not Found";
-	_statusCode[405] = "Method Not Allowed";
-	_statusCode[413] = "Payload Too Large";
-	_statusCode[500] = "Internal Server Error";
-	_statusCode[501] = "Not Implemented";
+	_statusMessages[200] = "OK";
+	_statusMessages[201] = "Created";
+	_statusMessages[204] = "No Content";
+	_statusMessages[301] = "Moved Permanently";
+	_statusMessages[400] = "Bad Request";
+	_statusMessages[403] = "Forbidden";
+	_statusMessages[404] = "Not Found";
+	_statusMessages[405] = "Method Not Allowed";
+	_statusMessages[413] = "Payload Too Large";
+	_statusMessages[500] = "Internal Server Error";
+	_statusMessages[501] = "Not Implemented";
 }
 
 std::string Response::_getContentType(const std::string& path) const {
@@ -33,7 +33,7 @@ std::string Response::_getContentType(const std::string& path) const {
 	return "text/plain";
 }
 
-void Response::statusCode(int code) {
+void Response::setStatusCode(int code) {
 	_statusCode = code;
 }
 
@@ -48,7 +48,7 @@ void Response::setBody(const std::string& body) {
 void Response::_generateRawResponse() {
 	std::ostringstream ss;
 
-	ss << "HTTP/1.1" << _statusCode << " ";
+	ss << "HTTP/1.1 " << _statusCode << " ";
 	if (_statusMessages.find(_statusCode) != _statusMessages.end())
 		ss << _statusMessages[_statusCode];
 	else
