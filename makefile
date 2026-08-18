@@ -1,13 +1,13 @@
 
-NAME        = webserv
-CXX         = c++
-CXXFLAGS    = -Wall -Wextra -Werror -std=c++98
+NAME		= webserv
+CXX			= c++
+CXXFLAGS	= -Wall -Wextra -Werror -std=c++98
 
-OBJ_DIR     = obj
+OBJ_DIR		= obj
 
-SRCS        = $(shell find . -type f -name "*.cpp" -not -path "./$(OBJ_DIR)/*")
+SRCS		= $(shell find . -type f -name "*.cpp" -not -path "./$(OBJ_DIR)/*")
 
-OBJS        = $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(SRCS))
+OBJS		= $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(SRCS))
 
 all: $(NAME)
 
