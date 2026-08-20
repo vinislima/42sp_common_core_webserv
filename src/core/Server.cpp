@@ -25,28 +25,84 @@ Server::~Server() {
 }
 
 void Server::_setupSockets() {
+	std::vector<std::string> boundAddresses;
+
 	for (size_t i = 0; i < _configs.size(); ++i) {
+		std::ostringstream ss;
+		ss << _configs[i].getHost() << ":" << _configs[i].getPort();
+		std::string currentAddr = ss.str();
+		bool alreadyBound = false;
+
+		for (size_t j = 0; j < boundAddresses.size(); ++j) {
+			if (boundAddresses[j] == currentAddr) {
+				alreadyBound = true;
+				break;
+			}
+		}
+		if (alreadyBound) {
+			std::cout << "[INFO] Socket para " << currentAddr << " ja está aberto. Configurado como Virtual Host.\n";
+			continue;
+		}
 		int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-		if (sockfd < 0) throw std::runtime_error("Erro: Falha ao criar o socket.");
+		if (sockfd < 0)
+			throw std::runtime_error("Erro: Falha ao criar o socket.");
+
 		int opt = 1;
-		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) throw std::runtime_error("Erro: Falha no setsockopt.");
-		if (fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) throw std::runtime_error("Erro: Falha ao definir socket como n o bloqueante.");
-		if (fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) throw std::runtime_error("Erro: Falha ao definir socket com FD_CLOEXEC.");
+		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+			throw std::runtime_error("Erro: Falha no setsockopt.");
+
+		if (fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0)
+			throw std::runtime_error("Erro: Falha ao definir socket como nao bloqueante.");
+
+		if (fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0)
+			throw std::runtime_error("Erro: Falha ao definir socket com FD_CLOEXEC.");
+
 		struct sockaddr_in addr;
 		std::memset(&addr, 0, sizeof(addr));
 		addr.sin_family = AF_INET;
 		addr.sin_port = htons(_configs[i].getPort());
 		addr.sin_addr.s_addr = inet_addr(_configs[i].getHost().c_str());
-		if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) throw std::runtime_error("Erro: Falha no bind.");
-		if (listen(sockfd, 128) < 0) throw std::runtime_error("Erro: Falha no listen.");
+
+		if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0)
+			throw std::runtime_error("Erro: Falha no bind no endereço " + currentAddr);
+
+		if (listen(sockfd, 128) < 0)
+			throw std::runtime_error("Erro: Falha no listen.");
+
 		_listenSockets.push_back(sockfd);
+
 		struct pollfd pfd;
 		pfd.fd = sockfd;
 		pfd.events = POLLIN;
 		pfd.revents = 0;
 		_pollFds.push_back(pfd);
-		std::cout << "[SUCESSO] Servidor ouvindo em " << _configs[i].getHost() << ":" << _configs[i].getPort() << "\n";
+
+		boundAddresses.push_back(currentAddr);
+
+		std::cout << "[SUCESSO] Servidor ouvindo em " << currentAddr << "\n";
 	}
+	// for (size_t i = 0; i < _configs.size(); ++i) {
+	// 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	// 	if (sockfd < 0) throw std::runtime_error("Erro: Falha ao criar o socket.");
+	// 	int opt = 1;
+	// 	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) throw std::runtime_error("Erro: Falha no setsockopt.");
+	// 	if (fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) throw std::runtime_error("Erro: Falha ao definir socket como n o bloqueante.");
+	// 	if (fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) throw std::runtime_error("Erro: Falha ao definir socket com FD_CLOEXEC.");
+	// 	struct sockaddr_in addr;
+	// 	std::memset(&addr, 0, sizeof(addr));
+	// 	addr.sin_family = AF_INET;
+	// 	addr.sin_port = htons(_configs[i].getPort());
+	// 	addr.sin_addr.s_addr = inet_addr(_configs[i].getHost().c_str());
+	// 	if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) throw std::runtime_error("Erro: Falha no bind.");
+	// 	if (listen(sockfd, 128) < 0) throw std::runtime_error("Erro: Falha no listen.");
+	// 	_listenSockets.push_back(sockfd);
+	// 	struct pollfd pfd;
+	// 	pfd.fd = sockfd;
+	// 	pfd.events = POLLIN;
+	// 	pfd.revents = 0;
+	// 	_pollFds.push_back(pfd);
+	// 	std::cout << "[SUCESSO] Servidor ouvindo em " << _configs[i].getHost() << ":" << _configs[i].getPort() << "\n";
+	// }
 }
 
 bool Server::_isListenSocket(int fd) {
@@ -95,7 +151,29 @@ bool Server::_handleClientWrite(int clientFd) {
 		if (client.req.isComplete()) {
 			if (!client.isReadyToSend) {
 				Response res;
-				res.build(client.req);
+				std::string hostHeader = client.req.getHeader("Host");
+				size_t colonPos = hostHeader.find(':');
+
+				if (colonPos != std::string::npos) {
+					hostHeader = hostHeader.substr(0, colonPos);
+				}
+				const ServerConfig* matchedConfig = &_configs[0];
+
+				for (size_t i = 0; i < _configs.size(); ++i) {
+					std::vector<std::string> names = _configs[i].getServerNames();
+					bool found = false;
+					for (size_t j = 0; j < names.size(); ++j) {
+						if (names[j] == hostHeader) {
+							found = true;
+							break;
+						}
+					}
+					if (found) {
+						matchedConfig = &_configs[i];
+						break;
+					}
+				}
+				res.build(client.req, *matchedConfig);
 				client.responseBuffer = res.getRawResponse();
 				client.bytesSent = 0;
 				client.isReadyToSend = true;
@@ -107,13 +185,15 @@ bool Server::_handleClientWrite(int clientFd) {
 				std::cerr << "[ERRO] Falha ao enviar resposta ou conexao prematuramente fechada pelo cliente\n";
 				return false;
 			}
+
 			client.bytesSent += sent;
 			std::cout << "[HTTP] Chunck enviado ao FD " << clientFd << "(Tamanho: " << sent << " bytes)\n";
 
 			if (client.bytesSent >= client.responseBuffer.length()) {
-				std::cout << "[HTTP] Resposta completa enviada com sucesso ao FD " << clientFd << "\n";
+			std::cout << "[HTTP] Resposta completa enviada com sucesso ao FD " << clientFd << "\n";
 				return false;
 			}
+			return true;
 		}
 	}
 	return true; 
