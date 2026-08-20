@@ -114,6 +114,8 @@ void Response::build(const Request& req, const ServerConfig& config) {
 		filepath = filepath.substr(0, filepath.length() - 1);
 	}
 
+	std::cout << "[DEBUG] Tentando ler do disco o caminho: " << filepath << "\n";
+
 	if (req.getMethod() == "GET") {
 		struct stat path_stat;
 		if (stat(filepath.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
@@ -194,8 +196,12 @@ void Response::build(const Request& req, const ServerConfig& config) {
 		}
 	}
 	else if (req.getMethod() == "POST") {
-		std::ofstream outFile(filepath.c_str(), std::ios::out | std::ios::binary);
+		struct stat path_stat;
+		if (stat(filepath.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
+			filepath += "/upload_generico.txt";
+		}
 
+		std::ofstream outFile(filepath.c_str(), std::ios::out | std::ios::binary);
 		if (outFile.is_open()) {
 			outFile.write(req.getBody().c_str(), req.getBody().length());
 			outFile.close();
