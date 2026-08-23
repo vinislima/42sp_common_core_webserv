@@ -81,28 +81,6 @@ void Server::_setupSockets() {
 
 		std::cout << "[SUCESSO] Servidor ouvindo em " << currentAddr << "\n";
 	}
-	// for (size_t i = 0; i < _configs.size(); ++i) {
-	// 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	// 	if (sockfd < 0) throw std::runtime_error("Erro: Falha ao criar o socket.");
-	// 	int opt = 1;
-	// 	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) throw std::runtime_error("Erro: Falha no setsockopt.");
-	// 	if (fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) throw std::runtime_error("Erro: Falha ao definir socket como n o bloqueante.");
-	// 	if (fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) throw std::runtime_error("Erro: Falha ao definir socket com FD_CLOEXEC.");
-	// 	struct sockaddr_in addr;
-	// 	std::memset(&addr, 0, sizeof(addr));
-	// 	addr.sin_family = AF_INET;
-	// 	addr.sin_port = htons(_configs[i].getPort());
-	// 	addr.sin_addr.s_addr = inet_addr(_configs[i].getHost().c_str());
-	// 	if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) throw std::runtime_error("Erro: Falha no bind.");
-	// 	if (listen(sockfd, 128) < 0) throw std::runtime_error("Erro: Falha no listen.");
-	// 	_listenSockets.push_back(sockfd);
-	// 	struct pollfd pfd;
-	// 	pfd.fd = sockfd;
-	// 	pfd.events = POLLIN;
-	// 	pfd.revents = 0;
-	// 	_pollFds.push_back(pfd);
-	// 	std::cout << "[SUCESSO] Servidor ouvindo em " << _configs[i].getHost() << ":" << _configs[i].getPort() << "\n";
-	// }
 }
 
 bool Server::_isListenSocket(int fd) {
@@ -121,9 +99,10 @@ void Server::_acceptNewConnection(int listenFd) {
 	fcntl(clientFd, F_SETFD, FD_CLOEXEC);
 	struct pollfd pfd;
 	pfd.fd = clientFd;
-	pfd.events = POLLIN | POLLOUT; 
+	pfd.events = POLLIN; 
 	pfd.revents = 0;
 	_pollFds.push_back(pfd);
+	_clients[clientFd] = Client();
 	std::cout << "[REDE] Novo cliente conectado! FD: " << clientFd << " IP: " << inet_ntoa(clientAddr.sin_addr) << "\n";
 }
 
@@ -135,6 +114,7 @@ bool Server::_handleClientRead(int clientFd) {
 	buffer[bytesRead] = '\0';
 	Client& client = _clients[clientFd];
 	client.req.appendToRaw(std::string(buffer, bytesRead));
+	client.updateActivity();
 	try {
 		client.req.parse();
 	} catch (const std::exception& e) {
@@ -187,6 +167,7 @@ bool Server::_handleClientWrite(int clientFd) {
 			}
 
 			client.bytesSent += sent;
+			client.updateActivity();
 			std::cout << "[HTTP] Chunck enviado ao FD " << clientFd << "(Tamanho: " << sent << " bytes)\n";
 
 			if (client.bytesSent >= client.responseBuffer.length()) {
@@ -197,6 +178,31 @@ bool Server::_handleClientWrite(int clientFd) {
 		}
 	}
 	return true; 
+}
+
+void Server::_checkTimeouts() {
+	time_t 			now = time(NULL);
+	const double	TIMEOUT_SECONDS = 60.0;
+
+	for (size_t i = _pollFds.size(); i > 0; --i) {
+		size_t	idx = i - 1;
+		int		fd = _pollFds[idx].fd;
+
+		if (_isListenSocket(fd)) {
+			continue;
+		}
+		if (_clients.find(fd) != _clients.end()) {
+			double elapsed = difftime(now, _clients[fd].lastActivity);
+
+			if (elapsed > TIMEOUT_SECONDS) {
+				std::cout << "[TIMEOUT] Derrubando conexao ociosa (Hanging Connection). FD: " << fd << "\n";
+
+				close(fd);
+				_clients.erase(fd);
+				_pollFds.erase(_pollFds.begin() + idx);
+			}
+		}
+	}
 }
 
 void Server::_runEventLoop() {
@@ -229,6 +235,10 @@ void Server::_runEventLoop() {
 						_pollFds.erase(_pollFds.begin() + i);
 						i--;
 						continue;
+					} else {
+						if (_clients[_pollFds[i].fd].req.isComplete()) {
+							_pollFds[i].events = POLLOUT;
+						}
 					}
 				}
 			}
@@ -248,6 +258,7 @@ void Server::_runEventLoop() {
 				}
 			}
 		}
+		_checkTimeouts();
 	}
 }
 

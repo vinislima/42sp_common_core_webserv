@@ -26,12 +26,10 @@ private:
 	void	_setupSockets();
 	bool	_isListenSocket(int fd);
 	void	_acceptNewConnection(int listenFd);
-
 	bool	_handleClientRead(int clientFd);
-
 	bool	_handleClientWrite(int clientFd); 
-
 	void	_runEventLoop();
+	void	_checkTimeouts();
 
 public:
 	Server();
