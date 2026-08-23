@@ -1,0 +1,15 @@
+server {
+    listen 8080;
+    server_name local.com;
+    
+    # Regra Global do servidor
+    root /var/www/site;
+    autoindex off;
+    index index.html index.htm;
+    
+    # Regra Exclusiva para a pasta de arquivos
+    location /files/ {
+        root /var/www/arquivos_pesados;
+        autoindex on;
+    }
+}
