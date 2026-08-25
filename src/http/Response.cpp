@@ -96,6 +96,22 @@ void Response::build(const Request& req, const ServerConfig& config) {
 	_headers.clear();
 	_body.clear();
 	_rawResponse.clear();
+
+	if (req.getErrorCode() != 0) {
+		setStatusCode(req.getErrorCode());
+		
+		std::ostringstream oss;
+		if (req.getErrorCode() == 413) {
+			oss << "<html><body><h1 style='color:red'>413 - Payload Too Large</h1></body></html>";
+		} else {
+			oss << "<html><body><h1 style='color:red'>" << req.getErrorCode() << " - Erro na Requisicao</h1></body></html>";
+		}
+		
+		setBody(oss.str());
+		setHeader("Content-Type", "text/html");
+		_generateRawResponse();
+		return;
+	}
 	setStatusCode(200);
 
 	const LocationConfig* loc = _getBestMatchLocation(req.getUri(), config);
@@ -110,7 +126,7 @@ void Response::build(const Request& req, const ServerConfig& config) {
 
 	std::string filepath = root + req.getUri();
 
-	if (filepath != root && filepath[filepath.length() - 1] == '/'){
+	if (filepath != root && filepath[filepath.length() - 1] == '/') {
 		filepath = filepath.substr(0, filepath.length() - 1);
 	}
 
@@ -200,7 +216,6 @@ void Response::build(const Request& req, const ServerConfig& config) {
 		if (stat(filepath.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
 			filepath += "/upload_generico.txt";
 		}
-
 		std::ofstream outFile(filepath.c_str(), std::ios::out | std::ios::binary);
 		if (outFile.is_open()) {
 			outFile.write(req.getBody().c_str(), req.getBody().length());
