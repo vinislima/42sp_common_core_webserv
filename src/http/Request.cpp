@@ -56,7 +56,7 @@ void Request::parseBodyOnly() {
 			throw;
 		}
 	} else if (_method == "GET" || _method == "DELETE" || 
-			(getHeader("Content-Length").empty() && getHeader("Transfer-Enconding") != "chunked")) {
+			(getHeader("Content-Length").empty() && getHeader("Transfer-Encoding") != "chunked")) {
 		_isComplete = true;
 	}
 }

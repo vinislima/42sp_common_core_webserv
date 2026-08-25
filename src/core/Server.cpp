@@ -116,7 +116,7 @@ bool Server::_handleClientRead(int clientFd) {
 	client.req.appendToRaw(std::string(buffer, bytesRead));
 	client.updateActivity();
 	try {
-		if (client.req.areHeadersParsed()) {
+		if (!client.req.areHeadersParsed()) {
 			client.req.parseHeadersOnly();
 		}
 
