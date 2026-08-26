@@ -92,30 +92,83 @@ const LocationConfig* Response::_getBestMatchLocation(const std::string& uri, co
 	return bestMatch;
 }
 
+std::string Response::_getFallbackHTML(int code) const {
+	std::ostringstream	oss;
+	std::string			msg = "Unknown Error";
+	std::map<int, std::string>::const_iterator it = _statusMessages.find(code);
+
+	if (it != _statusMessages.end()) {
+		msg = it->second;
+	}
+
+	oss << "<!DOCTYPE html>\n<html>\n<head><title>" << code << " " << msg << "</title></head>\n"
+		<< "<body style=\"font-family: monospace; background-color: #282a36; color: #f8f8f2; text-align: center; padding: 50px;\">\n"
+		<< "	<h1 style=\"color: #ff5555;\">" << code << " - " << msg << "</h1>\n"
+		<< "	<hr>\n"
+		<< "	<p>Webserv / C++98 Fallback</p>\n"
+		<< "</body>\n</html>";
+
+	return oss.str();
+}
+
+void Response::_buildErrorPage(int code, const ServerConfig& config) {
+	setStatusCode(code);
+	bool customPageLoaded = false;
+
+	std::map<int, std::string> errorPages = config.getErrorPages();
+	std::map<int, std::string>::const_iterator it = errorPages.find(code);
+
+	if (it != errorPages.end()) {
+		std::string errorUri = it->second;
+		std::string root = config.getRoot();
+		if (root.empty()) {
+			root = "./www";
+		}
+
+		std::string filepath = root + errorUri;
+
+		std::ifstream file(filepath.c_str(), std::ios::in | std::ios::binary);
+		if (file.is_open()) {
+			std::ostringstream ss;
+			ss << file.rdbuf();
+			setBody(ss.str());
+			setHeader("Content-Type", _getContentType(filepath));
+			file.close();
+			customPageLoaded = true;
+		} else {
+			std::cout << "[WARN] Nao foi possivel carregar error_page customizada em: " << filepath << ". Usando fallback.\n";
+		}
+	}
+	if (!customPageLoaded) {
+		setBody(_getFallbackHTML(code));
+		setHeader("Content-Type", "text/html");
+	}
+	_generateRawResponse();
+}
+
 void Response::build(const Request& req, const ServerConfig& config) {
 	_headers.clear();
 	_body.clear();
 	_rawResponse.clear();
 
 	if (req.getErrorCode() != 0) {
-		setStatusCode(req.getErrorCode());
+		_buildErrorPage(req.getErrorCode(), config);
+		// setStatusCode(req.getErrorCode());
 		
-		std::ostringstream oss;
-		if (req.getErrorCode() == 413) {
-			oss << "<html><body><h1 style='color:red'>413 - Payload Too Large</h1></body></html>";
-		} else {
-			oss << "<html><body><h1 style='color:red'>" << req.getErrorCode() << " - Erro na Requisicao</h1></body></html>";
-		}
+		// std::ostringstream oss;
+		// if (req.getErrorCode() == 413) {
+		// 	oss << "<html><body><h1 style='color:red'>413 - Payload Too Large</h1></body></html>";
+		// } else {
+		// 	oss << "<html><body><h1 style='color:red'>" << req.getErrorCode() << " - Erro na Requisicao</h1></body></html>";
+		// }
 		
-		setBody(oss.str());
-		setHeader("Content-Type", "text/html");
-		_generateRawResponse();
+		// setBody(oss.str());
+		// setHeader("Content-Type", "text/html");
+		// _generateRawResponse();
 		return;
 	}
 	setStatusCode(200);
-
 	const LocationConfig* loc = _getBestMatchLocation(req.getUri(), config);
-
 	std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
 	bool autoindex = (loc) ? loc->getAutoindex() : config.getAutoindex();
 	std::vector<std::string> indexFiles = (loc && !loc->getIndex().empty()) ? loc->getIndex() : config.getIndex();
@@ -181,17 +234,19 @@ void Response::build(const Request& req, const ServerConfig& config) {
 						_generateRawResponse();
 						return;
 					} else {
-						setStatusCode(403);
-						setBody("<html><body><h1 style='color:red'>403 - Forbidden</h1></body></html>");
-						setHeader("Content-Type", "text/html");
-						_generateRawResponse();
+						_buildErrorPage(403, config);
+						// setStatusCode(403);
+						// setBody("<html><body><h1 style='color:red'>403 - Forbidden</h1></body></html>");
+						// setHeader("Content-Type", "text/html");
+						// _generateRawResponse();
 						return;
 					}
 				} else {
-					setStatusCode(403);
-					setBody("<html><body><h1 style='color:red'>403 - Forbidden</h1></body></html>");
-					setHeader("Content-Type", "text/html");
-					_generateRawResponse();
+					_buildErrorPage(403, config);
+					// setStatusCode(403);
+					// setBody("<html><body><h1 style='color:red'>403 - Forbidden</h1></body></html>");
+					// setHeader("Content-Type", "text/html");
+					// _generateRawResponse();
 					return;
 				}
 			}
@@ -206,9 +261,11 @@ void Response::build(const Request& req, const ServerConfig& config) {
 			setHeader("Content-Type", _getContentType(filepath));
 			file.close();
 		} else {
-			setStatusCode(404);
-			setBody("<html><body><h1 style='color:red;'>404 - Pagina Nao Encontrada (Not Found)</h1></body></html>");
-			setHeader("Content-Type", "text/html");
+			_buildErrorPage(404, config);
+			return;
+			// setStatusCode(404);
+			// setBody("<html><body><h1 style='color:red;'>404 - Pagina Nao Encontrada (Not Found)</h1></body></html>");
+			// setHeader("Content-Type", "text/html");
 		}
 	}
 	else if (req.getMethod() == "POST") {
@@ -224,16 +281,20 @@ void Response::build(const Request& req, const ServerConfig& config) {
 			setBody("<html><body><h1 style='color:green'>201 - Arquivo Criado com Sucesso!</h1></body></html>");
 			setHeader("Content-Type", "text/html");
 		} else {
-			setStatusCode(500);
-			setBody("<html><body><h1 style='color:red'>500 - Erro Interno</h1></body></html>");
-			setHeader("Content-Type", "text/html");
+			_buildErrorPage(500, config);
+			return;
+			// setStatusCode(500);
+			// setBody("<html><body><h1 style='color:red'>500 - Erro Interno</h1></body></html>");
+			// setHeader("Content-Type", "text/html");
 		}
 	}
 	else if (req.getMethod() == "DELETE") {
 		if (access(filepath.c_str(), F_OK) != 0) {
-			setStatusCode(404);
-			setBody("<html><body><h1 style='color:red'>404 - Not Found</h1></body></html>");
-			setHeader("Content-Type", "text/html");
+			_buildErrorPage(404, config);
+			return;
+			// setStatusCode(404);
+			// setBody("<html><body><h1 style='color:red'>404 - Not Found</h1></body></html>");
+			// setHeader("Content-Type", "text/html");
 		}
 		else if (std::remove(filepath.c_str()) == 0) {
 			setStatusCode(200);
@@ -241,15 +302,19 @@ void Response::build(const Request& req, const ServerConfig& config) {
 			setHeader("Content-Type", "text/html");
 		}
 		else {
-			setStatusCode(403);
-			setBody("<html><body><h1 style='color:red'>403 - Forbidden</h1></body></html>");
-			setHeader("Content-Type", "text/html");
+			_buildErrorPage(403, config);
+			return;
+			// setStatusCode(403);
+			// setBody("<html><body><h1 style='color:red'>403 - Forbidden</h1></body></html>");
+			// setHeader("Content-Type", "text/html");
 		}
 	}
 	else {
-		setStatusCode(405);
-		setBody("<html><body><h1>405 - Metodo Nao Permitido</h1></body></html>");
-		setHeader("Content-Type", "text/html");
+		_buildErrorPage(405, config);
+		return;
+		// setStatusCode(405);
+		// setBody("<html><body><h1>405 - Metodo Nao Permitido</h1></body></html>");
+		// setHeader("Content-Type", "text/html");
 	}
 	_generateRawResponse();
 }
