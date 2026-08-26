@@ -201,7 +201,7 @@ bool Server::_handleClientWrite(int clientFd) {
 				client.isReadyToSend = true;
 			}
 			size_t bytesRemaining = client.responseBuffer.length() - client.bytesSent;
-			size_t sent = send(clientFd, client.responseBuffer.c_str() + client.bytesSent, bytesRemaining, 0);
+			ssize_t sent = send(clientFd, client.responseBuffer.c_str() + client.bytesSent, bytesRemaining, 0);
 
 			if (sent <= 0) {
 				std::cerr << "[ERRO] Falha ao enviar resposta ou conexao prematuramente fechada pelo cliente\n";

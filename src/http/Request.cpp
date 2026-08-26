@@ -1,6 +1,6 @@
 #include "../../inc/Request.hpp"
 
-Request::Request() : _isComplete(false) {}
+Request::Request() : _isComplete(false), _headersParsed(false), _bodyAuthorized(false), _maxBodySize(0), _errorCode(0) {}
 Request::Request(const std::string& rawRequest) : _rawRequest(rawRequest), _isComplete(false) {}
 Request::Request(const Request& src) { *this = src; }
 Request& Request::operator=(const Request& rhs) {
