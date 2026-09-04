@@ -116,10 +116,52 @@ bool Server::_handleClientRead(int clientFd) {
 	client.req.appendToRaw(std::string(buffer, bytesRead));
 	client.updateActivity();
 	try {
-		client.req.parse();
+		if (!client.req.areHeadersParsed()) {
+			client.req.parseHeadersOnly();
+		}
+
+		if (client.req.areHeadersParsed() && !client.req.isBodyAuthorized()) {
+			std::string hostHeader = client.req.getHeader("Host");
+			size_t colonPos = hostHeader.find(':');
+			
+			if(colonPos != std::string::npos) {
+				hostHeader = hostHeader.substr(0, colonPos);
+			}
+			const ServerConfig* matchedConfig = &_configs[0];
+
+			for (size_t i = 0; i < _configs.size(); ++i) {
+				std::vector<std::string> names = _configs[i].getServerNames();
+				bool found = false;
+				for (size_t j = 0; j < names.size(); ++j) {
+					if (names[j] == hostHeader) {
+						found = true;
+						break;
+					}
+				}
+				if (found) {
+					matchedConfig = &_configs[i];
+					break;
+				}
+			}
+			size_t maxBodySize = matchedConfig->getClientMaxBodySize();
+			client.req.setMaxBodySize(maxBodySize);
+
+			std::string cl = client.req.getHeader("Content-Length");
+			if (!cl.empty()) {
+				size_t contentLen = std::strtoul(cl.c_str(), NULL, 10);
+
+				if (contentLen > maxBodySize && maxBodySize > 0) {
+					client.req.setErrorCode(413);
+				}
+			}
+			client.req.setBodyAuthorized(true);
+		}
+		if (client.req.areHeadersParsed() && client.req.getErrorCode() == 0) {
+			client.req.parseBodyOnly();
+		}
 	} catch (const std::exception& e) {
-		std::cout << "[DEBUG] Parse pendente ou erro: " << e.what() << "\n";
-		return true; 
+		// std::cout << "[DEBUG] Parse pendente ou erro: " << e.what() << "\n";
+		// return true; 
 	}
 	return true;
 }
@@ -159,7 +201,7 @@ bool Server::_handleClientWrite(int clientFd) {
 				client.isReadyToSend = true;
 			}
 			size_t bytesRemaining = client.responseBuffer.length() - client.bytesSent;
-			size_t sent = send(clientFd, client.responseBuffer.c_str() + client.bytesSent, bytesRemaining, 0);
+			ssize_t sent = send(clientFd, client.responseBuffer.c_str() + client.bytesSent, bytesRemaining, 0);
 
 			if (sent <= 0) {
 				std::cerr << "[ERRO] Falha ao enviar resposta ou conexao prematuramente fechada pelo cliente\n";
@@ -171,7 +213,7 @@ bool Server::_handleClientWrite(int clientFd) {
 			std::cout << "[HTTP] Chunck enviado ao FD " << clientFd << "(Tamanho: " << sent << " bytes)\n";
 
 			if (client.bytesSent >= client.responseBuffer.length()) {
-			std::cout << "[HTTP] Resposta completa enviada com sucesso ao FD " << clientFd << "\n";
+				std::cout << "[HTTP] Resposta completa enviada com sucesso ao FD " << clientFd << "\n";
 				return false;
 			}
 			return true;
