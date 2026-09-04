@@ -6,7 +6,7 @@
 /*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/08/13 20:11:00 by vinda-si          #+#    #+#             */
-/*   Updated: 2026/08/18 23:07:35 by vinda-si         ###   ########.fr       */
+/*   Updated: 2026/08/25 22:50:57 by vinda-si         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -26,11 +26,13 @@ private:
 	std::string 						_rawResponse;
 	std::map<std::string, std::string>	_headers;
 	std::map<int, std::string>			_statusMessages;
+	std::string							_getFallbackHTML(int code) const;
 
 	void		_initStatusMessages();
 	void		_generateRawResponse();
 	std::string _getContentType(const std::string& path) const;
 	const		LocationConfig* _getBestMatchLocation(const std::string& uri, const ServerConfig& config) const;
+	void		_buildErrorPage(int code, const ServerConfig& config);
 
 public:
 	Response();
