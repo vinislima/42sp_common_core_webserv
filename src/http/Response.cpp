@@ -21,6 +21,10 @@ void Response::_initStatusMessages() {
 	_statusMessages[201] = "Created";
 	_statusMessages[204] = "No Content";
 	_statusMessages[301] = "Moved Permanently";
+	_statusMessages[302] = "Found";
+	_statusMessages[303] = "See Other";
+	_statusMessages[307] = "Temporary Redirect";
+	_statusMessages[308] = "Permanent Redirect";
 	_statusMessages[400] = "Bad Request";
 	_statusMessages[403] = "Forbidden";
 	_statusMessages[404] = "Not Found";
@@ -157,18 +161,6 @@ void Response::build(const Request& req, const ServerConfig& config) {
 
 	if (req.getErrorCode() != 0) {
 		_buildErrorPage(req.getErrorCode(), config);
-		// setStatusCode(req.getErrorCode());
-		
-		// std::ostringstream oss;
-		// if (req.getErrorCode() == 413) {
-		// 	oss << "<html><body><h1 style='color:red'>413 - Payload Too Large</h1></body></html>";
-		// } else {
-		// 	oss << "<html><body><h1 style='color:red'>" << req.getErrorCode() << " - Erro na Requisicao</h1></body></html>";
-		// }
-		
-		// setBody(oss.str());
-		// setHeader("Content-Type", "text/html");
-		// _generateRawResponse();
 		return;
 	}
 	setStatusCode(200);
@@ -178,6 +170,32 @@ void Response::build(const Request& req, const ServerConfig& config) {
     if (qmPos != std::string::npos) {
         cleanUri = cleanUri.substr(0, qmPos); 
     }
+
+	const LocationConfig* loc = _getBestMatchLocation(req.getUri(), config);
+
+	if (loc && loc->getRedirectCode() != 0) {
+		int rCode = loc->getRedirectCode();
+		setStatusCode(rCode);
+		setHeader("Location", loc->getRedirectUrl());
+
+		std::ostringstream oss;
+		oss << "<html>\n<head><title>" << rCode << " " << _statusMessages[rCode] << "</title></head>\n"
+			<< "<body style=\"background-color: #282a36; color: #f8f8f2; text-align: center; padding: 50px;\">\n"
+			<< "  <h1>" << rCode << " - " << _statusMessages[rCode] << "</h1>\n"
+			<< "  <p>Redirecionando para <a style=\"color: #8be9fd;\" href=\"" << loc->getRedirectUrl() << "\">" 
+			<< loc->getRedirectUrl() << "</a></p>\n"
+			<< "</body>\n</html>";
+
+		setBody(oss.str());
+		setHeader("Content-Type", "text/html");
+		_generateRawResponse();
+
+		return;
+	}
+
+	std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
+	bool autoindex = (loc) ? loc->getAutoindex() : config.getAutoindex();
+	std::vector<std::string> indexFiles = (loc && !loc->getIndex().empty()) ? loc->getIndex() : config.getIndex();
 
     const LocationConfig* loc = _getBestMatchLocation(cleanUri, config);
     std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
@@ -285,38 +303,99 @@ void Response::build(const Request& req, const ServerConfig& config) {
 		} else {
 			_buildErrorPage(404, config);
 			return;
-			// setStatusCode(404);
-			// setBody("<html><body><h1 style='color:red;'>404 - Pagina Nao Encontrada (Not Found)</h1></body></html>");
-			// setHeader("Content-Type", "text/html");
 		}
 	}
 	else if (req.getMethod() == "POST") {
-		struct stat path_stat;
-		if (stat(filepath.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
-			filepath += "/upload_generico.txt";
+		std::string uploadStore = (loc) ? loc->getUploadStore() : "";
+
+		if (uploadStore.empty()) {
+			std::cout << "[DEBUG] Post recusado: Nenhum upload_store configurado para a rota" << req.getUri() << ".\n";
+			_buildErrorPage(403, config);
+			return;
 		}
-		std::ofstream outFile(filepath.c_str(), std::ios::out | std::ios::binary);
+		if (uploadStore[uploadStore.length() - 1] == '/') {
+			uploadStore = uploadStore.substr(0, uploadStore.length() - 1);
+		}
+
+		struct stat uploadStat;
+		if (stat(uploadStore.c_str(), &uploadStat) != 0 || !S_ISDIR(uploadStat.st_mode)) {
+			std::cout << "[ERRO] POST falhou: Diretorio de upload (" << uploadStore << ") nao existe no disco.\n";
+			_buildErrorPage(500, config);
+			return;
+		}
+
+		std::string filename = "";
+		std::string contentDisposition = req.getHeader("Content-Disposition");
+
+		if (!contentDisposition.empty()) {
+			size_t namePos = contentDisposition.find("filename=\"");
+			
+			if (namePos != std::string::npos) {
+				namePos += 10;
+				size_t endPos = contentDisposition.find("\"", namePos);
+
+				if (endPos != std::string::npos) {
+					filename = contentDisposition.substr(namePos, endPos - namePos);
+				}
+			}
+		}
+
+		if (filename.empty()) {
+			std::ostringstream oss;
+			oss << "upload_" << time(NULL) << ".bin";
+			filename = oss.str();
+		}
+
+		std::string fullUploadPath = uploadStore + "/" + filename;
+		std::ofstream outFile(fullUploadPath.c_str(), std::ios::out | std::ios::binary);
+
 		if (outFile.is_open()) {
 			outFile.write(req.getBody().c_str(), req.getBody().length());
 			outFile.close();
+
 			setStatusCode(201);
-			setBody("<html><body><h1 style='color:green'>201 - Arquivo Criado com Sucesso!</h1></body></html>");
+			std::ostringstream responseHtml;
+			responseHtml	<< "<html><body style=\"font-family: monospace; background-color: #282a36; color: #f8f8f2; padding: 20px;\">"
+							<< "<h1 style='color: #50fa7b;'>201 - Arquivo Salvo (Created)</h1>"
+							<< "<p>Caminho no disco: " << fullUploadPath << "</p>"
+							<< "</body></html>";
+
+			setBody(responseHtml.str());
 			setHeader("Content-Type", "text/html");
-		} else {
+
+			std::string locationHeader = req.getUri();
+			if (locationHeader[locationHeader.length() - 1] != '/') {
+				locationHeader += "/";
+			}
+			locationHeader += filename;
+			setHeader("Location", locationHeader);
+		}
+		else
+		{
+			std::cout << "[ERRO] Permissao negada ou disco cheio ao gravar em " << fullUploadPath << "\n";
 			_buildErrorPage(500, config);
 			return;
-			// setStatusCode(500);
-			// setBody("<html><body><h1 style='color:red'>500 - Erro Interno</h1></body></html>");
-			// setHeader("Content-Type", "text/html");
 		}
+		// struct stat path_stat;
+		// if (stat(filepath.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
+		// 	filepath += "/upload_generico.txt";
+		// }
+		// std::ofstream outFile(filepath.c_str(), std::ios::out | std::ios::binary);
+		// if (outFile.is_open()) {
+		// 	outFile.write(req.getBody().c_str(), req.getBody().length());
+		// 	outFile.close();
+		// 	setStatusCode(201);
+		// 	setBody("<html><body><h1 style='color:green'>201 - Arquivo Criado com Sucesso!</h1></body></html>");
+		// 	setHeader("Content-Type", "text/html");
+		// } else {
+		// 	_buildErrorPage(500, config);
+		// 	return;
+		// }
 	}
 	else if (req.getMethod() == "DELETE") {
 		if (access(filepath.c_str(), F_OK) != 0) {
 			_buildErrorPage(404, config);
 			return;
-			// setStatusCode(404);
-			// setBody("<html><body><h1 style='color:red'>404 - Not Found</h1></body></html>");
-			// setHeader("Content-Type", "text/html");
 		}
 		else if (std::remove(filepath.c_str()) == 0) {
 			setStatusCode(200);
@@ -326,17 +405,11 @@ void Response::build(const Request& req, const ServerConfig& config) {
 		else {
 			_buildErrorPage(403, config);
 			return;
-			// setStatusCode(403);
-			// setBody("<html><body><h1 style='color:red'>403 - Forbidden</h1></body></html>");
-			// setHeader("Content-Type", "text/html");
 		}
 	}
 	else {
 		_buildErrorPage(405, config);
 		return;
-		// setStatusCode(405);
-		// setBody("<html><body><h1>405 - Metodo Nao Permitido</h1></body></html>");
-		// setHeader("Content-Type", "text/html");
 	}
 	_generateRawResponse();
 }

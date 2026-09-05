@@ -1,11 +1,11 @@
 #include "../../inc/LocationConfig.hpp"
 
-LocationConfig::LocationConfig() : _path(""), _root(""), _autoindex(false) {}
+LocationConfig::LocationConfig() : _path(""), _root(""), _autoindex(false), _redirectCode(0), _redirectUrl(""), _uploadStore("") {}
 
-LocationConfig::LocationConfig(const std::string& path) : _path(path), _root(""), _autoindex(false) {}
+LocationConfig::LocationConfig(const std::string& path) : _path(path), _root(""), _autoindex(false), _redirectCode(0), _redirectUrl(""), _uploadStore("") {}
 
 LocationConfig::LocationConfig(const LocationConfig& src) {
-    *this = src;
+	*this = src;
 }
 
 LocationConfig& LocationConfig::operator=(const LocationConfig& rhs) {
@@ -16,8 +16,11 @@ LocationConfig& LocationConfig::operator=(const LocationConfig& rhs) {
         this->_index = rhs._index;
         this->_cgiExt = rhs._cgiExt;
         this->_cgiPath = rhs._cgiPath;
-    }
-    return *this;
+		    this->_redirectCode = rhs._redirectCode;
+		    this->_redirectUrl = rhs._redirectUrl;
+	    	this->_uploadStore = rhs._uploadStore;
+	}
+	return *this;
 }
 
 LocationConfig::~LocationConfig() {}
@@ -26,6 +29,23 @@ void LocationConfig::setPath(const std::string& path) { this->_path = path; }
 void LocationConfig::setRoot(const std::string& root) { this->_root = root; }
 void LocationConfig::setAutoindex(bool autoindex) { this->_autoindex = autoindex; }
 void LocationConfig::addIndex(const std::string& index) { this->_index.push_back(index); }
+
+void LocationConfig::setRedirect(int code, const std::string& url) {
+	this->_redirectCode = code;
+	this->_redirectUrl = url;
+}
+
+void LocationConfig::setUploadStore(const std::string& path) {
+	this->_uploadStore = path;
+}
+
+int LocationConfig::getRedirectCode() const {
+	return this->_redirectCode;
+}
+
+std::string LocationConfig::getRedirectUrl() const {
+	return this->_redirectUrl;
+}
 
 std::string LocationConfig::getPath() const { return this->_path; }
 std::string LocationConfig::getRoot() const { return this->_root; }
@@ -36,3 +56,4 @@ void LocationConfig::setCgiExt(const std::string& ext) { this->_cgiExt = ext; }
 void LocationConfig::setCgiPath(const std::string& path) { this->_cgiPath = path; }
 std::string LocationConfig::getCgiExt() const { return this->_cgiExt; }
 std::string LocationConfig::getCgiPath() const { return this->_cgiPath; }
+std::string LocationConfig::getUploadStore() const { return this->_uploadStore; }
