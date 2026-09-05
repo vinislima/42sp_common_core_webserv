@@ -315,61 +315,75 @@ void ConfigParser::_parseIndex(std::vector<std::string>& outIndexList, size_t& i
 }
 
 void ConfigParser::_parseLocation(ServerConfig& server, size_t& i) {
-	i++; 
-		
-	if (i >= _tokens.size() || _tokens[i] == "{") {
-		 throw std::runtime_error("Erro: Bloco location sem caminho especificado");
-	}
-		
-	std::string path = _tokens[i];
-	i++; 
-		
-	if (i >= _tokens.size() || _tokens[i] != "{") {
-		 throw std::runtime_error("Erro: Bloco location sem chave de abertura '{'");
-	}
-	i++; 
-		
-	LocationConfig newLocation(path);
-		
-	while (i < _tokens.size() && _tokens[i] != "}") {
-		if (_tokens[i] == ";") {
-			i++; 
-			continue;
-		}
-		else if (_tokens[i] == "root") {
-			std::string rootVal;
-			_parseRoot(rootVal, i);
-			newLocation.setRoot(rootVal);
-		}
-		else if (_tokens[i] == "autoindex") {
-			bool autoindexVal;
-			_parseAutoindex(autoindexVal, i);
-			newLocation.setAutoindex(autoindexVal);
-		}
-		else if (_tokens[i] == "index") {
-			std::vector<std::string> indexList;
-			_parseIndex(indexList, i);
-			for (size_t j = 0; j < indexList.size(); ++j) {
-				newLocation.addIndex(indexList[j]);
-			}
-		}
-		else if (_tokens[i] == "return") {
-			_parseReturn(newLocation, i);
-		}
-		else if (_tokens[i] == "upload_store") {
-			std::string uploadPath;
-			_parseUploadStore(uploadPath, i);
-			newLocation.setUploadStore(uploadPath);
-		}
-		else {
-			throw std::runtime_error("Erro de Sintaxe: Diretiva desconhecida no bloco location: '" + _tokens[i] + "'");
-		}
-	}
-	if (i == _tokens.size()) {
-		throw std::runtime_error("Erro: Bloco location sem chave de fechamento '}'");
-	}
-	server.addLocation(newLocation);
-	i++; 
+    i++; 
+    if (i >= _tokens.size() || _tokens[i] == "{") { 
+        throw std::runtime_error("Erro: Bloco location sem caminho especificado");
+    }
+    std::string path = _tokens[i];
+    i++; 
+    if (i >= _tokens.size() || _tokens[i] != "{") { 
+        throw std::runtime_error("Erro: Bloco location sem chave de abertura '{'");
+    }
+    i++; 
+    LocationConfig newLocation(path);
+
+    while (i < _tokens.size() && _tokens[i] != "}") {
+        if (_tokens[i] == ";") {
+            i++; 
+            continue;
+        }
+        else if (_tokens[i] == "root") {
+            std::string rootVal;
+            _parseRoot(rootVal, i);
+            newLocation.setRoot(rootVal);
+        }
+        else if (_tokens[i] == "autoindex") {
+            bool autoindexVal;
+            _parseAutoindex(autoindexVal, i);
+            newLocation.setAutoindex(autoindexVal);
+        }
+        else if (_tokens[i] == "index") {
+            std::vector<std::string> indexList;
+            _parseIndex(indexList, i);
+            for (size_t j = 0; j < indexList.size(); ++j) {
+                newLocation.addIndex(indexList[j]);
+            }
+        }
+        else if (_tokens[i] == "return") {
+            _parseReturn(newLocation, i);
+        }
+        else if (_tokens[i] == "upload_store") {
+            std::string uploadPath;
+            _parseUploadStore(uploadPath, i);
+            newLocation.setUploadStore(uploadPath);
+        }
+        // ==========================================
+        // ADICIONADOS PARA RECONHECER O CGI NO .CONF
+        // ==========================================
+        else if (_tokens[i] == "cgi_ext") {
+            i++;
+            if (i >= _tokens.size() || _tokens[i] == ";") throw std::runtime_error("Erro: cgi_ext vazio");
+            newLocation.setCgiExt(_tokens[i]);
+            i++;
+            if (i >= _tokens.size() || _tokens[i] != ";") throw std::runtime_error("Erro: Diretiva cgi_ext sem ponto e virgula ';'");
+        }
+        else if (_tokens[i] == "cgi_pass") {
+            i++;
+            if (i >= _tokens.size() || _tokens[i] == ";") throw std::runtime_error("Erro: cgi_pass vazio");
+            newLocation.setCgiPath(_tokens[i]);
+            i++;
+            if (i >= _tokens.size() || _tokens[i] != ";") throw std::runtime_error("Erro: Diretiva cgi_pass sem ponto e virgula ';'");
+        }
+        // ==========================================
+        else {
+            throw std::runtime_error("Erro de Sintaxe: Diretiva desconhecida no bloco location: '" + _tokens[i] + "'");
+        }
+    }
+    if (i == _tokens.size()) {
+        throw std::runtime_error("Erro: Bloco location sem chave de fechamento '}'");
+    }
+    server.addLocation(newLocation);
+    i++; 
 }
 
 void ConfigParser::_parseReturn(LocationConfig& location, size_t& i) {

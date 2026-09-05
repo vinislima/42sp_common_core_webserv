@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   Response.hpp                                       :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
+/*   By: yvieira- <yvieira-@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/08/13 20:11:00 by vinda-si          #+#    #+#             */
-/*   Updated: 2026/08/25 22:50:57 by vinda-si         ###   ########.fr       */
+/*   Updated: 2026/09/05 20:53:07 by yvieira-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -30,6 +30,8 @@ private:
 	pid_t _cgiPid;
     int _cgiReadFd;
     int _cgiWriteFd;
+	int _fileReadFd;
+	int _fileWriteFd;
 
 	void		_initStatusMessages();
 	void		_generateRawResponse();
@@ -53,6 +55,9 @@ public:
     int getCgiWriteFd() const { return _cgiWriteFd; }
 
 	std::string getRawResponse() const;
+
+	int getFileReadFd() const { return _fileReadFd; }
+	int getFileWriteFd() const { return _fileWriteFd; }
 };
 
 #endif

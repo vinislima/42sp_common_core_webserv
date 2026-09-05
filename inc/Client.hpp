@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   Client.hpp                                         :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
+/*   By: yvieira- <yvieira-@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/08/17 22:39:29 by vinda-si          #+#    #+#             */
-/*   Updated: 2026/08/22 20:40:29 by vinda-si         ###   ########.fr       */
+/*   Updated: 2026/09/05 20:52:28 by yvieira-         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -33,8 +33,15 @@ class Client {
     	std::string cgiOutput;
     	size_t cgiBytesWritten;
 
+		bool isFile;
+		int fileReadFd;
+		int fileWriteFd;
+		std::string fileBuffer;
+
+		
+
 		Client() : bytesSent(0), isReadyToSend(false), isCgi(false), cgiPid(-1), 
-               cgiReadFd(-1), cgiWriteFd(-1), cgiBytesWritten(0) {
+               cgiReadFd(-1), cgiWriteFd(-1), cgiBytesWritten(0), isFile(false), fileReadFd(-1), fileWriteFd(-1) {
         lastActivity = time(NULL);
     	}
 		~Client() {}

@@ -163,21 +163,23 @@ void Response::build(const Request& req, const ServerConfig& config) {
 		_buildErrorPage(req.getErrorCode(), config);
 		return;
 	}
-	setStatusCode(200);
-	
-	std::string cleanUri = req.getUri();
-    size_t qmPos = cleanUri.find('?');
-    if (qmPos != std::string::npos) {
-        cleanUri = cleanUri.substr(0, qmPos); 
-    }
 
-	const LocationConfig* loc = _getBestMatchLocation(req.getUri(), config);
+	setStatusCode(200);
+
+	// 1. Limpa a URI para ignorar a Query String na hora de buscar o arquivo
+	std::string cleanUri = req.getUri();
+	size_t queryPos = cleanUri.find('?');
+	if (queryPos != std::string::npos) {
+		cleanUri = cleanUri.substr(0, queryPos);
+	}
+
+	// 2. Busca a Location usando a URI limpa (DECLARADO APENAS UMA VEZ)
+	const LocationConfig* loc = _getBestMatchLocation(cleanUri, config);
 
 	if (loc && loc->getRedirectCode() != 0) {
 		int rCode = loc->getRedirectCode();
 		setStatusCode(rCode);
 		setHeader("Location", loc->getRedirectUrl());
-
 		std::ostringstream oss;
 		oss << "<html>\n<head><title>" << rCode << " " << _statusMessages[rCode] << "</title></head>\n"
 			<< "<body style=\"background-color: #282a36; color: #f8f8f2; text-align: center; padding: 50px;\">\n"
@@ -185,19 +187,13 @@ void Response::build(const Request& req, const ServerConfig& config) {
 			<< "  <p>Redirecionando para <a style=\"color: #8be9fd;\" href=\"" << loc->getRedirectUrl() << "\">" 
 			<< loc->getRedirectUrl() << "</a></p>\n"
 			<< "</body>\n</html>";
-
 		setBody(oss.str());
 		setHeader("Content-Type", "text/html");
 		_generateRawResponse();
-
 		return;
 	}
 
-	std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
-	bool autoindex = (loc) ? loc->getAutoindex() : config.getAutoindex();
-	std::vector<std::string> indexFiles = (loc && !loc->getIndex().empty()) ? loc->getIndex() : config.getIndex();
-
-    const LocationConfig* loc = _getBestMatchLocation(cleanUri, config);
+    // ... Continua o código normal a partir daqui ( if (root.empty()) { ... )
     std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
     bool autoindex = (loc) ? loc->getAutoindex() : config.getAutoindex();
     std::vector<std::string> indexFiles = (loc && !loc->getIndex().empty()) ? loc->getIndex() : config.getIndex();

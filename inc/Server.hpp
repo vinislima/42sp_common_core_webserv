@@ -23,6 +23,7 @@ private:
 	std::vector<struct pollfd>	_pollFds;
 	std::map<int, Client>		_clients;
 	std::map<int, int> _cgiToClient;
+	std::map<int, int> _fileToClient;
 
 	void	_setupSockets();
 	bool	_isListenSocket(int fd);
