@@ -275,6 +275,12 @@ void ConfigParser::_parseUploadStore(std::string& outPath, size_t& i) {
 	if (i >= _tokens.size() || _tokens[i] == ";") {
 		throw std::runtime_error("Erro: Diretiva upload_store vazia");
 	}
+	outPath = _tokens[i];
+
+	i++;
+	if (i >= _tokens.size() || _tokens[i] != ";") {
+		throw std::runtime_error("Erro: Diretiva upload_store sem ponto e virgula ';'");
+	}
 }
 
 void ConfigParser::_parseAutoindex(bool& outAutoindex, size_t& i) {
