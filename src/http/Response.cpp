@@ -17,6 +17,10 @@ void Response::_initStatusMessages() {
 	_statusMessages[201] = "Created";
 	_statusMessages[204] = "No Content";
 	_statusMessages[301] = "Moved Permanently";
+	_statusMessages[302] = "Found";
+	_statusMessages[303] = "See Other";
+	_statusMessages[307] = "Temporary Redirect";
+	_statusMessages[308] = "Permanent Redirect";
 	_statusMessages[400] = "Bad Request";
 	_statusMessages[403] = "Forbidden";
 	_statusMessages[404] = "Not Found";
@@ -153,22 +157,32 @@ void Response::build(const Request& req, const ServerConfig& config) {
 
 	if (req.getErrorCode() != 0) {
 		_buildErrorPage(req.getErrorCode(), config);
-		// setStatusCode(req.getErrorCode());
-		
-		// std::ostringstream oss;
-		// if (req.getErrorCode() == 413) {
-		// 	oss << "<html><body><h1 style='color:red'>413 - Payload Too Large</h1></body></html>";
-		// } else {
-		// 	oss << "<html><body><h1 style='color:red'>" << req.getErrorCode() << " - Erro na Requisicao</h1></body></html>";
-		// }
-		
-		// setBody(oss.str());
-		// setHeader("Content-Type", "text/html");
-		// _generateRawResponse();
 		return;
 	}
 	setStatusCode(200);
+
 	const LocationConfig* loc = _getBestMatchLocation(req.getUri(), config);
+
+	if (loc && loc->getRedirectCode() != 0) {
+		int rCode = loc->getRedirectCode();
+		setStatusCode(rCode);
+		setHeader("Location", loc->getRedirectUrl());
+
+		std::ostringstream oss;
+		oss << "<html>\n<head><title>" << rCode << " " << _statusMessages[rCode] << "</title></head>\n"
+			<< "<body style=\"background-color: #282a36; color: #f8f8f2; text-align: center; padding: 50px;\">\n"
+			<< "  <h1>" << rCode << " - " << _statusMessages[rCode] << "</h1>\n"
+			<< "  <p>Redirecionando para <a style=\"color: #8be9fd;\" href=\"" << loc->getRedirectUrl() << "\">" 
+			<< loc->getRedirectUrl() << "</a></p>\n"
+			<< "</body>\n</html>";
+
+		setBody(oss.str());
+		setHeader("Content-Type", "text/html");
+		_generateRawResponse();
+
+		return;
+	}
+
 	std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
 	bool autoindex = (loc) ? loc->getAutoindex() : config.getAutoindex();
 	std::vector<std::string> indexFiles = (loc && !loc->getIndex().empty()) ? loc->getIndex() : config.getIndex();
