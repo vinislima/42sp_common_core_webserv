@@ -12,6 +12,7 @@ private:
 	std::vector<std::string>	_index;
 	int							_redirectCode;
 	std::string					_redirectUrl;
+	std::string					_uploadStore;
 
 public:
 	LocationConfig();
@@ -25,6 +26,7 @@ public:
 	void setAutoindex(bool autoindex);
 	void addIndex(const std::string& index);
 	void setRedirect(int code, const std::string& url);
+	void setUploadStore(const std::string& path);
 	int getRedirectCode() const;
 	std::string getRedirectUrl() const;
 
@@ -32,6 +34,7 @@ public:
 	std::string					getRoot() const;
 	bool						getAutoindex() const;
 	std::vector<std::string>	getIndex() const;
+	std::string getUploadStore() const;
 };
 
 #endif

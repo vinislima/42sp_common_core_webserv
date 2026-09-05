@@ -270,6 +270,13 @@ void ConfigParser::_parseRoot(std::string& outRoot, size_t& i) {
 	}
 }
 
+void ConfigParser::_parseUploadStore(std::string& outPath, size_t& i) {
+	i++;
+	if (i >= _tokens.size() || _tokens[i] == ";") {
+		throw std::runtime_error("Erro: Diretiva upload_store vazia");
+	}
+}
+
 void ConfigParser::_parseAutoindex(bool& outAutoindex, size_t& i) {
 	i++; 
 	if (i >= _tokens.size() || _tokens[i] == ";") {
@@ -342,6 +349,11 @@ void ConfigParser::_parseLocation(ServerConfig& server, size_t& i) {
 		}
 		else if (_tokens[i] == "return") {
 			_parseReturn(newLocation, i);
+		}
+		else if (_tokens[i] == "upload_store") {
+			std::string uploadPath;
+			_parseUploadStore(uploadPath, i);
+			newLocation.setUploadStore(uploadPath);
 		}
 		else {
 			throw std::runtime_error("Erro de Sintaxe: Diretiva desconhecida no bloco location: '" + _tokens[i] + "'");
