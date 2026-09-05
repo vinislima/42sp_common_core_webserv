@@ -1,7 +1,8 @@
 #include "../../inc/Server.hpp"
 #include "../../inc/Request.hpp"
 #include "../../inc/Response.hpp" 
-#include <sys/wait.h> 
+#include <sys/wait.h> // Para waitpid() no CGI
+#include <cstdlib>    // Para std::strtoul
 
 Server::Server() {}
 
@@ -167,13 +168,15 @@ bool Server::_handleClientRead(int clientFd) {
 		}
 	} catch (const std::exception& e) {
 		std::string errorMsg = e.what();
-        
-        if (errorMsg == "Body incompleto" || errorMsg == "Chunk incompleto") {
-            return true; 
-        }
+		
+		// O TCP fragmentou o pacote. Mantemos a conexão viva e aguardamos o resto.
+		if (errorMsg == "Body incompleto" || errorMsg == "Chunk incompleto") {
+			return true; 
+		}
 
-        std::cerr << "[ERRO] Requisicao malformada ou invalida: " << errorMsg << "\n";
-        client.req.setErrorCode(400);
+		// Erro real de protocolo
+		std::cerr << "[ERRO] Requisicao malformada ou invalida: " << errorMsg << "\n";
+		client.req.setErrorCode(400);
 	}
 	return true;
 }
@@ -210,6 +213,9 @@ bool Server::_handleClientWrite(int clientFd) {
 				
 				res.build(client.req, *matchedConfig);
 
+				// ==============================================================
+				// INTERCEPTADOR DE CGI: Transfere os FDs para o poll()
+				// ==============================================================
 				if (res.getCgiPid() != -1) {
 					client.isCgi = true;
 					client.cgiPid = res.getCgiPid();
@@ -218,6 +224,7 @@ bool Server::_handleClientWrite(int clientFd) {
 					client.cgiOutput = "";
 					client.cgiBytesWritten = 0;
 
+					// Coloca o tubo de LEITURA na fila do poll()
 					struct pollfd pfdRead;
 					pfdRead.fd = client.cgiReadFd;
 					pfdRead.events = POLLIN;
@@ -225,6 +232,7 @@ bool Server::_handleClientWrite(int clientFd) {
 					_pollFds.push_back(pfdRead);
 					_cgiToClient[client.cgiReadFd] = clientFd;
 
+					// Se tiver Body (POST), coloca o de ESCRITA na fila
 					if (!client.req.getBody().empty()) {
 						struct pollfd pfdWrite;
 						pfdWrite.fd = client.cgiWriteFd;
@@ -237,15 +245,17 @@ bool Server::_handleClientWrite(int clientFd) {
 						client.cgiWriteFd = -1;
 					}
 
+					// Retira o POLLOUT do cliente para o servidor parar de tentar responder
 					for (size_t k = 0; k < _pollFds.size(); ++k) {
 						if (_pollFds[k].fd == clientFd) {
 							_pollFds[k].events = POLLIN;
 							break;
 						}
 					}
-					return true; 
+					return true; // Volta para o Event Loop
 				}
 
+				// FLUXO NORMAL (Arquivos Estáticos)
 				client.responseBuffer = res.getRawResponse();
 				client.bytesSent = 0;
 				client.isReadyToSend = true;
@@ -282,7 +292,7 @@ void Server::_checkTimeouts() {
 		int		fd = _pollFds[idx].fd;
 
 		if (_isListenSocket(fd) || _cgiToClient.find(fd) != _cgiToClient.end()) {
-			continue; 
+			continue; // Não dá timeout em tubos do CGI nem em Listen Sockets
 		}
 		
 		if (_clients.find(fd) != _clients.end()) {
@@ -308,11 +318,15 @@ void Server::_runEventLoop() {
 		for (size_t i = 0; i < _pollFds.size(); ++i) {
 			if (_pollFds[i].revents == 0) continue;
 
+			// =================================================================
+			// 1. TRATAMENTO DOS TUBOS DO CGI (Processamento Assíncrono)
+			// =================================================================
 			if (_cgiToClient.find(_pollFds[i].fd) != _cgiToClient.end()) {
 				int clientFd = _cgiToClient[_pollFds[i].fd];
 				Client& client = _clients[clientFd];
 
-				if (_pollFds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+				// Tratamento de Erro fatal no Pipe (sem o POLLHUP aqui)
+				if (_pollFds[i].revents & (POLLERR | POLLNVAL)) {
 					if (_pollFds[i].fd == client.cgiReadFd) {
 						waitpid(client.cgiPid, NULL, WNOHANG);
 						close(client.cgiReadFd);
@@ -332,73 +346,91 @@ void Server::_runEventLoop() {
 					continue;
 				}
 
-				if ((_pollFds[i].revents & POLLOUT) && _pollFds[i].fd == client.cgiWriteFd) {
-					std::string body = client.req.getBody();
-					size_t remaining = body.length() - client.cgiBytesWritten;
-					ssize_t sent = write(_pollFds[i].fd, body.c_str() + client.cgiBytesWritten, remaining);
+				// TUBO DE ESCRITA: Webserv empurrando o Body (POST) pro CGI
+				if (_pollFds[i].fd == client.cgiWriteFd) {
+					if (_pollFds[i].revents & (POLLOUT | POLLHUP)) {
+						std::string body = client.req.getBody();
+						size_t remaining = body.length() - client.cgiBytesWritten;
+						ssize_t sent = 0;
+						
+						if (_pollFds[i].revents & POLLOUT) {
+							sent = write(_pollFds[i].fd, body.c_str() + client.cgiBytesWritten, remaining);
+							if (sent > 0) client.cgiBytesWritten += sent;
+						}
 
-					if (sent > 0) client.cgiBytesWritten += sent;
-
-					if (client.cgiBytesWritten >= body.length() || sent <= 0) {
-						close(_pollFds[i].fd); 
-						_cgiToClient.erase(_pollFds[i].fd);
-						_pollFds.erase(_pollFds.begin() + i);
-						client.cgiWriteFd = -1;
-						i--;
+						if (client.cgiBytesWritten >= body.length() || sent <= 0 || (_pollFds[i].revents & POLLHUP)) {
+							close(_pollFds[i].fd); // Fechar envia o sinal de EOF
+							_cgiToClient.erase(_pollFds[i].fd);
+							_pollFds.erase(_pollFds.begin() + i);
+							client.cgiWriteFd = -1;
+							i--;
+						}
 					}
 					continue;
 				}
 
-				if ((_pollFds[i].revents & POLLIN) && _pollFds[i].fd == client.cgiReadFd) {
-					char buffer[4096];
-					ssize_t bytesRead = read(_pollFds[i].fd, buffer, sizeof(buffer) - 1);
+				// TUBO DE LEITURA: Webserv lendo o Output que o CGI gerou
+				if (_pollFds[i].fd == client.cgiReadFd) {
+					if ((_pollFds[i].revents & POLLIN) || (_pollFds[i].revents & POLLHUP)) {
+						char buffer[4096];
+						ssize_t bytesRead = read(_pollFds[i].fd, buffer, sizeof(buffer) - 1);
 
-					if (bytesRead > 0) {
-						buffer[bytesRead] = '\0';
-						client.cgiOutput += buffer;
-					} else if (bytesRead == 0) {
-						waitpid(client.cgiPid, NULL, WNOHANG); 
-						close(_pollFds[i].fd);
-						_cgiToClient.erase(_pollFds[i].fd);
-						_pollFds.erase(_pollFds.begin() + i);
-						client.cgiReadFd = -1;
-						i--;
+						if (bytesRead > 0) {
+							buffer[bytesRead] = '\0';
+							client.cgiOutput += buffer;
+						} 
+						
+						// Se o read retornar 0, batemos no EOF real, ou o pipe quebrou sem dados.
+						if (bytesRead <= 0 || (_pollFds[i].revents & POLLHUP)) {
+							waitpid(client.cgiPid, NULL, WNOHANG); // Limpa o Processo Zumbi
+							close(_pollFds[i].fd);
+							_cgiToClient.erase(_pollFds[i].fd);
+							_pollFds.erase(_pollFds.begin() + i);
+							client.cgiReadFd = -1;
+							i--;
 
-						size_t headerEnd = client.cgiOutput.find("\r\n\r\n");
-						size_t headerSize = 4;
-						if (headerEnd == std::string::npos) {
-							headerEnd = client.cgiOutput.find("\n\n");
-							headerSize = 2;
-						}
+							// Separa os Cabeçalhos do CGI do HTML gerado
+							size_t headerEnd = client.cgiOutput.find("\r\n\r\n");
+							size_t headerSize = 4;
+							if (headerEnd == std::string::npos) {
+								headerEnd = client.cgiOutput.find("\n\n");
+								headerSize = 2;
+							}
 
-						std::string cgiHeaders = "";
-						std::string cgiBody = client.cgiOutput;
+							std::string cgiHeaders = "";
+							std::string cgiBody = client.cgiOutput;
 
-						if (headerEnd != std::string::npos) {
-							cgiHeaders = client.cgiOutput.substr(0, headerEnd);
-							cgiBody = client.cgiOutput.substr(headerEnd + headerSize);
-						}
+							if (headerEnd != std::string::npos) {
+								cgiHeaders = client.cgiOutput.substr(0, headerEnd);
+								cgiBody = client.cgiOutput.substr(headerEnd + headerSize);
+							}
 
-						std::ostringstream responseStream;
-						responseStream << "HTTP/1.1 200 OK\r\n";
-						responseStream << "Content-Length: " << cgiBody.length() << "\r\n";
-						if (!cgiHeaders.empty()) responseStream << cgiHeaders << "\r\n\r\n";
-						else responseStream << "Content-Type: text/html\r\n\r\n";
-						responseStream << cgiBody;
+							// Monta a Resposta HTTP Final baseada na saída do script
+							std::ostringstream responseStream;
+							responseStream << "HTTP/1.1 200 OK\r\n";
+							responseStream << "Content-Length: " << cgiBody.length() << "\r\n";
+							if (!cgiHeaders.empty()) responseStream << cgiHeaders << "\r\n\r\n";
+							else responseStream << "Content-Type: text/html\r\n\r\n";
+							responseStream << cgiBody;
 
-						client.responseBuffer = responseStream.str();
-						client.bytesSent = 0;
-						client.isReadyToSend = true;
-						client.isCgi = false;
+							client.responseBuffer = responseStream.str();
+							client.bytesSent = 0;
+							client.isReadyToSend = true;
+							client.isCgi = false;
 
-						for (size_t k = 0; k < _pollFds.size(); ++k) {
-							if (_pollFds[k].fd == clientFd) _pollFds[k].events = POLLOUT;
+							// Devolve o POLLOUT para o Cliente!
+							for (size_t k = 0; k < _pollFds.size(); ++k) {
+								if (_pollFds[k].fd == clientFd) _pollFds[k].events = POLLOUT;
+							}
 						}
 					}
 					continue;
 				}
 			}
 
+			// =================================================================
+			// 2. TRATAMENTO NORMAL DOS CLIENTES E REDE
+			// =================================================================
 			if (_pollFds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
 				std::cout << "[REDE] Erro/HUP no cliente. FD: " << _pollFds[i].fd << "\n";
 				close(_pollFds[i].fd);

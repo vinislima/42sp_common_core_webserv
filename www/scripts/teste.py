@@ -11,7 +11,7 @@ print("<h1 style='color: #ff79c6;'>CGI Executado via fork() e execve()! 🚀</h1
 # Mostrando as variáveis que vieram do Server
 print("<h2>Variaveis de Ambiente recebidas:</h2><ul>")
 for key, value in os.environ.items():
-    if key in ["REQUEST_METHOD", "QUERY_STRING", "SCRIPT_FILENAME"]:
+    if key in ["REQUEST_METHOD", "QUERY_STRING", "SCRIPT_FILENAME"] or key.startswith("HTTP_"):
         print(f"<li><strong style='color: #8be9fd;'>{key}:</strong> {value}</li>")
 print("</ul>")
 

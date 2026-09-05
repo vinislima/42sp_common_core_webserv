@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <cctype>
 
 Response::Response() : _statusCode(200), _cgiPid(-1), _cgiReadFd(-1), _cgiWriteFd(-1) {
 	_initStatusMessages();
@@ -387,6 +388,19 @@ void Response::_handleCGI(const std::string& filepath, const std::string& cgiPat
     }
     if (!req.getHeader("Content-Type").empty()) envMap["CONTENT_TYPE"] = req.getHeader("Content-Type");
 
+	std::map<std::string, std::string> clientHeaders = req.getHeaders();
+    for (std::map<std::string, std::string>::const_iterator it = clientHeaders.begin(); it != clientHeaders.end(); ++it) {
+        std::string key = "HTTP_";
+        for (size_t k = 0; k < it->first.length(); ++k) {
+            if (it->first[k] == '-') {
+                key += '_';
+            } else {
+                key += std::toupper(static_cast<unsigned char>(it->first[k]));
+            }
+        }
+        envMap[key] = it->second;
+    }
+
     char** envp = new char*[envMap.size() + 1];
     size_t i = 0;
     for (std::map<std::string, std::string>::iterator it = envMap.begin(); it != envMap.end(); ++it) {
@@ -417,7 +431,10 @@ void Response::_handleCGI(const std::string& filepath, const std::string& cgiPat
     }
 
     if (pid == 0) {
-        if (chdir(scriptDir.c_str()) < 0) exit(1);
+        if (chdir(scriptDir.c_str()) < 0) {
+            std::cerr << "[CGI FATAL] Falha no chdir para a pasta: " << scriptDir << "\n";
+            exit(1);
+        }
 
         dup2(pipeIn[0], STDIN_FILENO);
         dup2(pipeOut[1], STDOUT_FILENO);
@@ -430,6 +447,8 @@ void Response::_handleCGI(const std::string& filepath, const std::string& cgiPat
         argv[2] = NULL;
 
         execve(cgiPath.c_str(), argv, envp);
+        
+        std::cerr << "[CGI FATAL] execve falhou ao tentar abrir o interpretador em: " << cgiPath << "\n";
         exit(1);
     } else {
         close(pipeIn[0]);  // Pai não lê da entrada
