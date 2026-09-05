@@ -28,6 +28,7 @@ private:
 	void	_parseIndex(std::vector<std::string>& outIndexList, size_t& i);
 	void	_parseLocation(ServerConfig& server, size_t& i);
 	void	_parseReturn(LocationConfig& location, size_t& i);
+	void	_parseUploadStore(std::string& outPath, size_t& i);
 
 public:
 	ConfigParser();
