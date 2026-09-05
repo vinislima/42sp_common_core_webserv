@@ -27,12 +27,17 @@ private:
 	std::map<std::string, std::string>	_headers;
 	std::map<int, std::string>			_statusMessages;
 	std::string							_getFallbackHTML(int code) const;
+	pid_t _cgiPid;
+    int _cgiReadFd;
+    int _cgiWriteFd;
 
 	void		_initStatusMessages();
 	void		_generateRawResponse();
 	std::string _getContentType(const std::string& path) const;
 	const		LocationConfig* _getBestMatchLocation(const std::string& uri, const ServerConfig& config) const;
 	void		_buildErrorPage(int code, const ServerConfig& config);
+	void _handleCGI(const std::string& filepath, const std::string& cgiPath, const Request& req, const ServerConfig& config);
+
 
 public:
 	Response();
@@ -43,6 +48,9 @@ public:
 	void	setBody(const std::string& body);
 
 	void	build(const Request& req, const ServerConfig& config);
+	pid_t getCgiPid() const { return _cgiPid; }
+    int getCgiReadFd() const { return _cgiReadFd; }
+    int getCgiWriteFd() const { return _cgiWriteFd; }
 
 	std::string getRawResponse() const;
 };

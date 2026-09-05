@@ -6,8 +6,8 @@
       "type": "lldb",
       "request": "launch",
       "args": [],
-      "cwd": "/Users/yurivieiradossantos/Documents/42sp/webserver/src",
-      "program": "/Users/yurivieiradossantos/Documents/42sp/webserver/src/build/Debug/outDebug"
+      "cwd": "/Users/yurivieiradossantos/Documents/42sp/webserver/src/http",
+      "program": "/Users/yurivieiradossantos/Documents/42sp/webserver/src/http/build/Debug/outDebug"
     }
   ]
 }

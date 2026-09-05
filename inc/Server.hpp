@@ -22,6 +22,7 @@ private:
 	std::vector<int>			_listenSockets;
 	std::vector<struct pollfd>	_pollFds;
 	std::map<int, Client>		_clients;
+	std::map<int, int> _cgiToClient;
 
 	void	_setupSockets();
 	bool	_isListenSocket(int fd);
@@ -30,6 +31,7 @@ private:
 	bool	_handleClientWrite(int clientFd); 
 	void	_runEventLoop();
 	void	_checkTimeouts();
+	
 
 public:
 	Server();

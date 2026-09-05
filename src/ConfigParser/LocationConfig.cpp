@@ -9,14 +9,16 @@ LocationConfig::LocationConfig(const LocationConfig& src) {
 }
 
 LocationConfig& LocationConfig::operator=(const LocationConfig& rhs) {
-	if (this != &rhs) {
-		this->_path = rhs._path;
-		this->_root = rhs._root;
-		this->_autoindex = rhs._autoindex;
-		this->_index = rhs._index;
-		this->_redirectCode = rhs._redirectCode;
-		this->_redirectUrl = rhs._redirectUrl;
-		this->_uploadStore = rhs._uploadStore;
+    if (this != &rhs) {
+        this->_path = rhs._path;
+        this->_root = rhs._root;
+        this->_autoindex = rhs._autoindex;
+        this->_index = rhs._index;
+        this->_cgiExt = rhs._cgiExt;
+        this->_cgiPath = rhs._cgiPath;
+		    this->_redirectCode = rhs._redirectCode;
+		    this->_redirectUrl = rhs._redirectUrl;
+	    	this->_uploadStore = rhs._uploadStore;
 	}
 	return *this;
 }
@@ -49,4 +51,9 @@ std::string LocationConfig::getPath() const { return this->_path; }
 std::string LocationConfig::getRoot() const { return this->_root; }
 bool LocationConfig::getAutoindex() const { return this->_autoindex; }
 std::vector<std::string> LocationConfig::getIndex() const { return this->_index; }
+
+void LocationConfig::setCgiExt(const std::string& ext) { this->_cgiExt = ext; }
+void LocationConfig::setCgiPath(const std::string& path) { this->_cgiPath = path; }
+std::string LocationConfig::getCgiExt() const { return this->_cgiExt; }
+std::string LocationConfig::getCgiPath() const { return this->_cgiPath; }
 std::string LocationConfig::getUploadStore() const { return this->_uploadStore; }
