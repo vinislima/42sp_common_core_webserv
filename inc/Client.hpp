@@ -25,10 +25,18 @@ class Client {
 		size_t		bytesSent;
 		bool		isReadyToSend;
 		time_t		lastActivity;
+		
+		bool isCgi;
+    	pid_t cgiPid;
+    	int cgiReadFd;
+    	int cgiWriteFd;
+    	std::string cgiOutput;
+    	size_t cgiBytesWritten;
 
-		Client() : bytesSent(0), isReadyToSend(false) {
-			lastActivity = time(NULL);
-		}
+		Client() : bytesSent(0), isReadyToSend(false), isCgi(false), cgiPid(-1), 
+               cgiReadFd(-1), cgiWriteFd(-1), cgiBytesWritten(0) {
+        lastActivity = time(NULL);
+    	}
 		~Client() {}
 		
 		void updateActivity() {

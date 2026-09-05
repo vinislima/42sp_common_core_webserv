@@ -1,6 +1,7 @@
 #include "../../inc/Server.hpp"
 #include "../../inc/Request.hpp"
 #include "../../inc/Response.hpp" 
+#include <sys/wait.h> 
 
 Server::Server() {}
 
@@ -95,14 +96,17 @@ void Server::_acceptNewConnection(int listenFd) {
 	socklen_t clientLen = sizeof(clientAddr);
 	int clientFd = accept(listenFd, (struct sockaddr*)&clientAddr, &clientLen);
 	if (clientFd < 0) return;
+	
 	fcntl(clientFd, F_SETFL, O_NONBLOCK);
 	fcntl(clientFd, F_SETFD, FD_CLOEXEC);
+	
 	struct pollfd pfd;
 	pfd.fd = clientFd;
 	pfd.events = POLLIN; 
 	pfd.revents = 0;
 	_pollFds.push_back(pfd);
 	_clients[clientFd] = Client();
+	
 	std::cout << "[REDE] Novo cliente conectado! FD: " << clientFd << " IP: " << inet_ntoa(clientAddr.sin_addr) << "\n";
 }
 
@@ -111,10 +115,12 @@ bool Server::_handleClientRead(int clientFd) {
 	ssize_t bytesRead = recv(clientFd, buffer, sizeof(buffer) - 1, 0);
 	if (bytesRead <= 0)
 		return false;
+		
 	buffer[bytesRead] = '\0';
 	Client& client = _clients[clientFd];
 	client.req.appendToRaw(std::string(buffer, bytesRead));
 	client.updateActivity();
+	
 	try {
 		if (!client.req.areHeadersParsed()) {
 			client.req.parseHeadersOnly();
@@ -160,8 +166,14 @@ bool Server::_handleClientRead(int clientFd) {
 			client.req.parseBodyOnly();
 		}
 	} catch (const std::exception& e) {
-		// std::cout << "[DEBUG] Parse pendente ou erro: " << e.what() << "\n";
-		// return true; 
+		std::string errorMsg = e.what();
+        
+        if (errorMsg == "Body incompleto" || errorMsg == "Chunk incompleto") {
+            return true; 
+        }
+
+        std::cerr << "[ERRO] Requisicao malformada ou invalida: " << errorMsg << "\n";
+        client.req.setErrorCode(400);
 	}
 	return true;
 }
@@ -195,11 +207,50 @@ bool Server::_handleClientWrite(int clientFd) {
 						break;
 					}
 				}
+				
 				res.build(client.req, *matchedConfig);
+
+				if (res.getCgiPid() != -1) {
+					client.isCgi = true;
+					client.cgiPid = res.getCgiPid();
+					client.cgiReadFd = res.getCgiReadFd();
+					client.cgiWriteFd = res.getCgiWriteFd();
+					client.cgiOutput = "";
+					client.cgiBytesWritten = 0;
+
+					struct pollfd pfdRead;
+					pfdRead.fd = client.cgiReadFd;
+					pfdRead.events = POLLIN;
+					pfdRead.revents = 0;
+					_pollFds.push_back(pfdRead);
+					_cgiToClient[client.cgiReadFd] = clientFd;
+
+					if (!client.req.getBody().empty()) {
+						struct pollfd pfdWrite;
+						pfdWrite.fd = client.cgiWriteFd;
+						pfdWrite.events = POLLOUT;
+						pfdWrite.revents = 0;
+						_pollFds.push_back(pfdWrite);
+						_cgiToClient[client.cgiWriteFd] = clientFd;
+					} else {
+						close(client.cgiWriteFd);
+						client.cgiWriteFd = -1;
+					}
+
+					for (size_t k = 0; k < _pollFds.size(); ++k) {
+						if (_pollFds[k].fd == clientFd) {
+							_pollFds[k].events = POLLIN;
+							break;
+						}
+					}
+					return true; 
+				}
+
 				client.responseBuffer = res.getRawResponse();
 				client.bytesSent = 0;
 				client.isReadyToSend = true;
 			}
+			
 			size_t bytesRemaining = client.responseBuffer.length() - client.bytesSent;
 			ssize_t sent = send(clientFd, client.responseBuffer.c_str() + client.bytesSent, bytesRemaining, 0);
 
@@ -210,7 +261,7 @@ bool Server::_handleClientWrite(int clientFd) {
 
 			client.bytesSent += sent;
 			client.updateActivity();
-			std::cout << "[HTTP] Chunck enviado ao FD " << clientFd << "(Tamanho: " << sent << " bytes)\n";
+			std::cout << "[HTTP] Chunck enviado ao FD " << clientFd << " (Tamanho: " << sent << " bytes)\n";
 
 			if (client.bytesSent >= client.responseBuffer.length()) {
 				std::cout << "[HTTP] Resposta completa enviada com sucesso ao FD " << clientFd << "\n";
@@ -223,16 +274,17 @@ bool Server::_handleClientWrite(int clientFd) {
 }
 
 void Server::_checkTimeouts() {
-	time_t 			now = time(NULL);
-	const double	TIMEOUT_SECONDS = 60.0;
+	time_t now = time(NULL);
+	const double TIMEOUT_SECONDS = 60.0;
 
 	for (size_t i = _pollFds.size(); i > 0; --i) {
 		size_t	idx = i - 1;
 		int		fd = _pollFds[idx].fd;
 
-		if (_isListenSocket(fd)) {
-			continue;
+		if (_isListenSocket(fd) || _cgiToClient.find(fd) != _cgiToClient.end()) {
+			continue; 
 		}
+		
 		if (_clients.find(fd) != _clients.end()) {
 			double elapsed = difftime(now, _clients[fd].lastActivity);
 
@@ -256,6 +308,97 @@ void Server::_runEventLoop() {
 		for (size_t i = 0; i < _pollFds.size(); ++i) {
 			if (_pollFds[i].revents == 0) continue;
 
+			if (_cgiToClient.find(_pollFds[i].fd) != _cgiToClient.end()) {
+				int clientFd = _cgiToClient[_pollFds[i].fd];
+				Client& client = _clients[clientFd];
+
+				if (_pollFds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+					if (_pollFds[i].fd == client.cgiReadFd) {
+						waitpid(client.cgiPid, NULL, WNOHANG);
+						close(client.cgiReadFd);
+						client.cgiReadFd = -1;
+						
+						client.responseBuffer = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+						client.isReadyToSend = true;
+						client.isCgi = false;
+						
+						for (size_t k = 0; k < _pollFds.size(); ++k) {
+							if (_pollFds[k].fd == clientFd) _pollFds[k].events = POLLOUT;
+						}
+					}
+					_cgiToClient.erase(_pollFds[i].fd);
+					_pollFds.erase(_pollFds.begin() + i);
+					i--;
+					continue;
+				}
+
+				if ((_pollFds[i].revents & POLLOUT) && _pollFds[i].fd == client.cgiWriteFd) {
+					std::string body = client.req.getBody();
+					size_t remaining = body.length() - client.cgiBytesWritten;
+					ssize_t sent = write(_pollFds[i].fd, body.c_str() + client.cgiBytesWritten, remaining);
+
+					if (sent > 0) client.cgiBytesWritten += sent;
+
+					if (client.cgiBytesWritten >= body.length() || sent <= 0) {
+						close(_pollFds[i].fd); 
+						_cgiToClient.erase(_pollFds[i].fd);
+						_pollFds.erase(_pollFds.begin() + i);
+						client.cgiWriteFd = -1;
+						i--;
+					}
+					continue;
+				}
+
+				if ((_pollFds[i].revents & POLLIN) && _pollFds[i].fd == client.cgiReadFd) {
+					char buffer[4096];
+					ssize_t bytesRead = read(_pollFds[i].fd, buffer, sizeof(buffer) - 1);
+
+					if (bytesRead > 0) {
+						buffer[bytesRead] = '\0';
+						client.cgiOutput += buffer;
+					} else if (bytesRead == 0) {
+						waitpid(client.cgiPid, NULL, WNOHANG); 
+						close(_pollFds[i].fd);
+						_cgiToClient.erase(_pollFds[i].fd);
+						_pollFds.erase(_pollFds.begin() + i);
+						client.cgiReadFd = -1;
+						i--;
+
+						size_t headerEnd = client.cgiOutput.find("\r\n\r\n");
+						size_t headerSize = 4;
+						if (headerEnd == std::string::npos) {
+							headerEnd = client.cgiOutput.find("\n\n");
+							headerSize = 2;
+						}
+
+						std::string cgiHeaders = "";
+						std::string cgiBody = client.cgiOutput;
+
+						if (headerEnd != std::string::npos) {
+							cgiHeaders = client.cgiOutput.substr(0, headerEnd);
+							cgiBody = client.cgiOutput.substr(headerEnd + headerSize);
+						}
+
+						std::ostringstream responseStream;
+						responseStream << "HTTP/1.1 200 OK\r\n";
+						responseStream << "Content-Length: " << cgiBody.length() << "\r\n";
+						if (!cgiHeaders.empty()) responseStream << cgiHeaders << "\r\n\r\n";
+						else responseStream << "Content-Type: text/html\r\n\r\n";
+						responseStream << cgiBody;
+
+						client.responseBuffer = responseStream.str();
+						client.bytesSent = 0;
+						client.isReadyToSend = true;
+						client.isCgi = false;
+
+						for (size_t k = 0; k < _pollFds.size(); ++k) {
+							if (_pollFds[k].fd == clientFd) _pollFds[k].events = POLLOUT;
+						}
+					}
+					continue;
+				}
+			}
+
 			if (_pollFds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
 				std::cout << "[REDE] Erro/HUP no cliente. FD: " << _pollFds[i].fd << "\n";
 				close(_pollFds[i].fd);
@@ -278,7 +421,7 @@ void Server::_runEventLoop() {
 						i--;
 						continue;
 					} else {
-						if (_clients[_pollFds[i].fd].req.isComplete()) {
+						if (_clients[_pollFds[i].fd].req.isComplete() && !_clients[_pollFds[i].fd].isCgi) {
 							_pollFds[i].events = POLLOUT;
 						}
 					}

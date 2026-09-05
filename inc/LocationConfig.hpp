@@ -9,7 +9,9 @@ private:
     std::string                 _path;      
     std::string                 _root;      
     bool                        _autoindex; 
-    std::vector<std::string>    _index;     
+    std::vector<std::string>    _index;    
+    std::string                 _cgiExt;
+    std::string                 _cgiPath; 
 
 public:
     LocationConfig();
@@ -27,6 +29,12 @@ public:
     std::string                 getRoot() const;
     bool                        getAutoindex() const;
     std::vector<std::string>    getIndex() const;
+
+    void setCgiExt(const std::string& ext);
+    void setCgiPath(const std::string& path);
+    std::string getCgiExt() const;
+    std::string getCgiPath() const;
+    
 };
 
 #endif

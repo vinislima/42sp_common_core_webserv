@@ -1,12 +1,15 @@
 #include "../../inc/Response.hpp"
+#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <cstdio>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
-Response::Response() : _statusCode(200) {
+Response::Response() : _statusCode(200), _cgiPid(-1), _cgiReadFd(-1), _cgiWriteFd(-1) {
 	_initStatusMessages();
 }
 
@@ -168,22 +171,40 @@ void Response::build(const Request& req, const ServerConfig& config) {
 		return;
 	}
 	setStatusCode(200);
-	const LocationConfig* loc = _getBestMatchLocation(req.getUri(), config);
-	std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
-	bool autoindex = (loc) ? loc->getAutoindex() : config.getAutoindex();
-	std::vector<std::string> indexFiles = (loc && !loc->getIndex().empty()) ? loc->getIndex() : config.getIndex();
+	
+	std::string cleanUri = req.getUri();
+    size_t qmPos = cleanUri.find('?');
+    if (qmPos != std::string::npos) {
+        cleanUri = cleanUri.substr(0, qmPos); 
+    }
 
-	if (root.empty()) {
-		root = "./www";
-	}
+    const LocationConfig* loc = _getBestMatchLocation(cleanUri, config);
+    std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
+    bool autoindex = (loc) ? loc->getAutoindex() : config.getAutoindex();
+    std::vector<std::string> indexFiles = (loc && !loc->getIndex().empty()) ? loc->getIndex() : config.getIndex();
 
-	std::string filepath = root + req.getUri();
+    if (root.empty()) {
+        root = "./www";
+    }
 
-	if (filepath != root && filepath[filepath.length() - 1] == '/') {
-		filepath = filepath.substr(0, filepath.length() - 1);
-	}
+    std::string filepath = root + cleanUri;
 
-	std::cout << "[DEBUG] Tentando ler do disco o caminho: " << filepath << "\n";
+    if (filepath != root && filepath[filepath.length() - 1] == '/') {
+        filepath = filepath.substr(0, filepath.length() - 1);
+    }
+
+    std::string cgiExt = (loc) ? loc->getCgiExt() : "";
+    std::string cgiPath = (loc) ? loc->getCgiPath() : "";
+
+    if (!cgiExt.empty() && filepath.length() >= cgiExt.length()) {
+        if (filepath.substr(filepath.length() - cgiExt.length()) == cgiExt) {
+            std::cout << "[CGI] Arquivo " << cgiExt << " detectado! Redirecionando para execucao.\n";
+            _handleCGI(filepath, cgiPath, req, config);
+            return;
+        }
+    }
+
+    std::cout << "[DEBUG] Tentando ler do disco o caminho: " << filepath << "\n";
 
 	if (req.getMethod() == "GET") {
 		struct stat path_stat;
@@ -320,4 +341,109 @@ void Response::build(const Request& req, const ServerConfig& config) {
 }
 std::string Response::getRawResponse() const {
 	return _rawResponse;
+}
+
+void Response::_handleCGI(const std::string& filepath, const std::string& cgiPath, const Request& req, const ServerConfig& config) {
+    std::string uri = req.getUri();
+    std::string queryString = "";
+    size_t qmPos = uri.find('?');
+    if (qmPos != std::string::npos) {
+        queryString = uri.substr(qmPos + 1);
+        uri = uri.substr(0, qmPos);
+    }
+
+    std::string cleanFilepath = filepath;
+    size_t filepathQM = cleanFilepath.find('?');
+    if (filepathQM != std::string::npos) {
+        cleanFilepath = cleanFilepath.substr(0, filepathQM);
+    }
+
+    std::string scriptDir = ".";
+    std::string scriptName = cleanFilepath;
+    size_t lastSlash = cleanFilepath.find_last_of('/');
+    if (lastSlash != std::string::npos) {
+        scriptDir = cleanFilepath.substr(0, lastSlash);
+        scriptName = cleanFilepath.substr(lastSlash + 1);
+    }
+
+    std::map<std::string, std::string> envMap;
+    envMap["REQUEST_METHOD"] = req.getMethod();
+    envMap["QUERY_STRING"] = queryString;
+    envMap["SCRIPT_FILENAME"] = scriptName;
+    envMap["SCRIPT_NAME"] = uri;
+    envMap["SERVER_PROTOCOL"] = req.getVersion();
+    envMap["SERVER_SOFTWARE"] = "Webserv/1.0";
+    envMap["GATEWAY_INTERFACE"] = "CGI/1.1";
+    envMap["REDIRECT_STATUS"] = "200";
+
+    std::ostringstream portStream;
+    portStream << config.getPort();
+    envMap["SERVER_PORT"] = portStream.str();
+
+    if (!req.getHeader("Content-Length").empty()) envMap["CONTENT_LENGTH"] = req.getHeader("Content-Length");
+    else {
+        std::ostringstream clStream; clStream << req.getBody().length();
+        envMap["CONTENT_LENGTH"] = clStream.str();
+    }
+    if (!req.getHeader("Content-Type").empty()) envMap["CONTENT_TYPE"] = req.getHeader("Content-Type");
+
+    char** envp = new char*[envMap.size() + 1];
+    size_t i = 0;
+    for (std::map<std::string, std::string>::iterator it = envMap.begin(); it != envMap.end(); ++it) {
+        std::string envStr = it->first + "=" + it->second;
+        envp[i] = new char[envStr.length() + 1];
+        std::strcpy(envp[i], envStr.c_str());
+        i++;
+    }
+    envp[i] = NULL;
+
+    int pipeIn[2], pipeOut[2];
+    if (pipe(pipeIn) < 0 || pipe(pipeOut) < 0) {
+        for (size_t j = 0; envp[j] != NULL; ++j) delete[] envp[j];
+        delete[] envp;
+        _buildErrorPage(500, config);
+        return;
+    }
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        close(pipeIn[0]); close(pipeIn[1]);
+        close(pipeOut[0]); close(pipeOut[1]);
+        for (size_t j = 0; envp[j] != NULL; ++j) delete[] envp[j];
+        delete[] envp;
+        _buildErrorPage(500, config);
+        return;
+    }
+
+    if (pid == 0) {
+        if (chdir(scriptDir.c_str()) < 0) exit(1);
+
+        dup2(pipeIn[0], STDIN_FILENO);
+        dup2(pipeOut[1], STDOUT_FILENO);
+        close(pipeIn[0]); close(pipeIn[1]);
+        close(pipeOut[0]); close(pipeOut[1]);
+
+        char* argv[3];
+        argv[0] = const_cast<char*>(cgiPath.c_str());
+        argv[1] = const_cast<char*>(scriptName.c_str());
+        argv[2] = NULL;
+
+        execve(cgiPath.c_str(), argv, envp);
+        exit(1);
+    } else {
+        close(pipeIn[0]);  // Pai não lê da entrada
+        close(pipeOut[1]); // Pai não escreve na saída
+
+        fcntl(pipeIn[1], F_SETFL, O_NONBLOCK);
+        fcntl(pipeOut[0], F_SETFL, O_NONBLOCK);
+
+        this->_cgiPid = pid;
+        this->_cgiWriteFd = pipeIn[1];
+        this->_cgiReadFd = pipeOut[0];
+
+        for (size_t j = 0; envp[j] != NULL; ++j) delete[] envp[j];
+        delete[] envp;
+
+    }
 }

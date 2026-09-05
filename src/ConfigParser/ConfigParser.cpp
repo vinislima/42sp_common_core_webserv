@@ -340,6 +340,20 @@ void ConfigParser::_parseLocation(ServerConfig& server, size_t& i) {
                 newLocation.addIndex(indexList[j]);
             }
         }
+        else if (_tokens[i] == "cgi_ext") {
+            i++;
+            if (i >= _tokens.size() || _tokens[i] == ";") 
+                throw std::runtime_error("Erro: cgi_ext vazio");
+            newLocation.setCgiExt(_tokens[i]);
+            i++;
+        }
+        else if (_tokens[i] == "cgi_pass") {
+            i++;
+            if (i >= _tokens.size() || _tokens[i] == ";") 
+                throw std::runtime_error("Erro: cgi_pass vazio");
+            newLocation.setCgiPath(_tokens[i]);
+            i++;
+        }
         else {
             throw std::runtime_error("Erro de Sintaxe: Diretiva desconhecida no bloco location: '" + _tokens[i] + "'");
         }
