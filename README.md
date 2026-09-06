@@ -1,4 +1,4 @@
-_Este projeto foi criado como parte do currículo da 42 por yvieira-, meandrad e vinda-si._
+_Este projeto foi criado como parte do currículo da 42 por yvieira-, elvictor e vinda-si._
 
 # Webserv
 

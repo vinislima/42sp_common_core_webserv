@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   LocationConfig.cpp                                 :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: yvieira- <yvieira-@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/09/06 12:06:36 by yvieira-          #+#    #+#             */
+/*   Updated: 2026/09/06 12:06:37 by yvieira-         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "../../inc/LocationConfig.hpp"
 
 LocationConfig::LocationConfig() : _path(""), _root(""), _autoindex(false), _redirectCode(0), _redirectUrl(""), _uploadStore("") {}

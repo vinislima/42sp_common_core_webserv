@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   Request.cpp                                        :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: yvieira- <yvieira-@student.42.fr>          +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/09/06 12:06:44 by yvieira-          #+#    #+#             */
+/*   Updated: 2026/09/06 12:09:54 by yvieira-         ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 #include "../../inc/Request.hpp"
 
 Request::Request() : _isComplete(false), _headersParsed(false), _bodyAuthorized(false), _maxBodySize(0), _errorCode(0) {}
@@ -33,16 +45,6 @@ void Request::parseHeadersOnly() {
 	_parseRequestLine(_rawRequest.substr(0, endOfFirstLine));
 	_parseHeaders(_rawRequest.substr(endOfFirstLine + 2, endOfHeaders - (endOfFirstLine + 2)));
 	_headersParsed = true;
-	// size_t startOfBody = endOfHeaders + 4;
-	// if (startOfBody < _rawRequest.length()) {
-	// 	try {
-	// 		_parseBody(_rawRequest.substr(startOfBody));
-	// 	} catch (const std::exception& e) {
-	// 		std::cout << "[DEBUG] Erro no Parse do Body: " << e.what() << "\n";
-	// 		throw; 
-	// 	}
-	// }
-	// _isComplete = true;
 }
 
 void Request::parseBodyOnly() {
