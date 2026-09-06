@@ -17,6 +17,7 @@ private:
     std::string                 _cgiExt;
     std::string                 _cgiPath;
     std::string                 _uploadStore;
+    std::vector<std::string>    _allowMethods;
 
 public:
     LocationConfig();
@@ -34,6 +35,8 @@ public:
     void setCgiExt(const std::string& ext);
     void setCgiPath(const std::string& path);
     void setUploadStore(const std::string& store);
+    void addAllowMethod(const std::string& method);
+
 
     int getRedirectCode() const;
     std::string getRedirectUrl() const;
@@ -45,6 +48,9 @@ public:
     std::string getCgiExt() const;
     std::string getCgiPath() const;
     std::string getUploadStore() const;
+
+    std::vector<std::string> getAllowMethods() const;
+    bool isMethodAllowed(const std::string& method) const;
 };
 
 #endif

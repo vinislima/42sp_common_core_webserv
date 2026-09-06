@@ -16,9 +16,10 @@ LocationConfig& LocationConfig::operator=(const LocationConfig& rhs) {
         this->_index = rhs._index;
         this->_cgiExt = rhs._cgiExt;
         this->_cgiPath = rhs._cgiPath;
-		    this->_redirectCode = rhs._redirectCode;
-		    this->_redirectUrl = rhs._redirectUrl;
-	    	this->_uploadStore = rhs._uploadStore;
+		this->_redirectCode = rhs._redirectCode;
+		this->_redirectUrl = rhs._redirectUrl;
+	    this->_uploadStore = rhs._uploadStore;
+		this->_allowMethods = rhs._allowMethods;
 	}
 	return *this;
 }
@@ -39,6 +40,9 @@ void LocationConfig::setUploadStore(const std::string& path) {
 	this->_uploadStore = path;
 }
 
+void LocationConfig::addAllowMethod(const std::string& method) { this->_allowMethods.push_back(method); }
+
+
 int LocationConfig::getRedirectCode() const {
 	return this->_redirectCode;
 }
@@ -57,3 +61,15 @@ void LocationConfig::setCgiPath(const std::string& path) { this->_cgiPath = path
 std::string LocationConfig::getCgiExt() const { return this->_cgiExt; }
 std::string LocationConfig::getCgiPath() const { return this->_cgiPath; }
 std::string LocationConfig::getUploadStore() const { return this->_uploadStore; }
+
+std::vector<std::string> LocationConfig::getAllowMethods() const { return this->_allowMethods; }
+
+bool LocationConfig::isMethodAllowed(const std::string& method) const {
+    // Se a diretiva não foi definida no .conf, permitimos tudo por padrão
+    if (this->_allowMethods.empty()) return true; 
+    
+    for (size_t i = 0; i < this->_allowMethods.size(); ++i) {
+        if (this->_allowMethods[i] == method) return true;
+    }
+    return false;
+}

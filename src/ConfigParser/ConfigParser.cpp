@@ -357,9 +357,9 @@ void ConfigParser::_parseLocation(ServerConfig& server, size_t& i) {
             _parseUploadStore(uploadPath, i);
             newLocation.setUploadStore(uploadPath);
         }
-        // ==========================================
-        // ADICIONADOS PARA RECONHECER O CGI NO .CONF
-        // ==========================================
+		else if (_tokens[i] == "allow_methods") {
+            _parseAllowMethods(newLocation, i);
+        }
         else if (_tokens[i] == "cgi_ext") {
             i++;
             if (i >= _tokens.size() || _tokens[i] == ";") throw std::runtime_error("Erro: cgi_ext vazio");
@@ -374,6 +374,7 @@ void ConfigParser::_parseLocation(ServerConfig& server, size_t& i) {
             i++;
             if (i >= _tokens.size() || _tokens[i] != ";") throw std::runtime_error("Erro: Diretiva cgi_pass sem ponto e virgula ';'");
         }
+		
         // ==========================================
         else {
             throw std::runtime_error("Erro de Sintaxe: Diretiva desconhecida no bloco location: '" + _tokens[i] + "'");
@@ -412,6 +413,23 @@ void ConfigParser::_parseReturn(LocationConfig& location, size_t& i) {
 		throw std::runtime_error("Erro: Diretiva 'return' sem ponto e virgula ';'");
 	}
 	location.setRedirect(code, url);
+}
+
+void ConfigParser::_parseAllowMethods(LocationConfig& location, size_t& i) {
+    i++;
+    if (i >= _tokens.size() || _tokens[i] == ";") {
+        throw std::runtime_error("Erro: Diretiva 'allow_methods' vazia.");
+    }
+    while (i < _tokens.size() && _tokens[i] != ";") {
+        if (_tokens[i] != "GET" && _tokens[i] != "POST" && _tokens[i] != "DELETE") {
+            throw std::runtime_error("Erro: Metodo HTTP invalido em allow_methods: " + _tokens[i]);
+        }
+        location.addAllowMethod(_tokens[i]);
+        i++;
+    }
+    if (i >= _tokens.size() || _tokens[i] != ";") {
+        throw std::runtime_error("Erro: Diretiva 'allow_methods' sem ponto e virgula ';'");
+    }
 }
 
 std::vector<std::string> ConfigParser::getTokens() const { return _tokens; }

@@ -6,7 +6,7 @@ import sys
 print("Content-Type: text/html\r\n\r\n", end="")
 
 print("<!DOCTYPE html><html><body style='background-color: #282a36; color: #f8f8f2; font-family: monospace;'>")
-print("<h1 style='color: #ff79c6;'>CGI Executado via fork() e execve()! 🚀</h1>")
+print("<h1 style='color: #ff79c6;'>CGI Executado via fork() e execve()!</h1>")
 
 # Mostrando as variáveis que vieram do Server
 print("<h2>Variaveis de Ambiente recebidas:</h2><ul>")
