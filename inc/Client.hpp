@@ -25,21 +25,22 @@ public:
     bool isReadyToSend;
     time_t lastActivity;
     
-    bool isCgi;     
-    pid_t cgiPid;     
-    int cgiReadFd;     
-    int cgiWriteFd;     
-    std::string cgiOutput;     
+    bool isCgi;
+    pid_t cgiPid;
+    int cgiReadFd;
+    int cgiWriteFd;
+    std::string cgiOutput;
     size_t cgiBytesWritten;
-    
-    // Variáveis de I/O de Arquivo Assíncrono
+    time_t cgiStart;
+
+    // Asynchronous file I/O variables
     bool isFile;
     int fileReadFd;
     int fileWriteFd;
     size_t fileBytesWritten;
 
     Client() : bytesSent(0), isReadyToSend(false), isCgi(false), cgiPid(-1),
-                cgiReadFd(-1), cgiWriteFd(-1), cgiBytesWritten(0),
+                cgiReadFd(-1), cgiWriteFd(-1), cgiBytesWritten(0), cgiStart(0),
                 isFile(false), fileReadFd(-1), fileWriteFd(-1), fileBytesWritten(0) {
         lastActivity = time(NULL);
     }

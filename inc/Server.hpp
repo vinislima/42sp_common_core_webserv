@@ -36,15 +36,22 @@ private:
 	std::map<int, Client>		_clients;
 	std::map<int, int> _cgiToClient;
 	std::map<int, int> _fileToClient;
+	std::map<int, int> _listenFdToPort;
+	std::map<int, int> _clientToListenFd;
 
 	void	_setupSockets();
 	bool	_isListenSocket(int fd);
 	void	_acceptNewConnection(int listenFd);
 	bool	_handleClientRead(int clientFd);
-	bool	_handleClientWrite(int clientFd); 
+	void	_parseClientRequest(int clientFd);
+	bool	_handleClientWrite(int clientFd);
 	void	_runEventLoop();
 	void	_checkTimeouts();
-	
+	void	_checkCgiTimeouts();
+	void	_closeClient(int clientFd, size_t pollIdx);
+	void	_erasePollFd(int fd);
+	const ServerConfig*	_matchConfig(int clientFd, const std::string& hostHeader) const;
+
 
 public:
 	Server();

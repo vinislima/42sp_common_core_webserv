@@ -107,3 +107,19 @@ std::vector<std::string> ServerConfig::getIndex() const {
 const std::vector<LocationConfig>& ServerConfig::getLocations() const {
 	return this->_locations;
 }
+
+const LocationConfig* ServerConfig::getBestMatchLocation(const std::string& uri) const {
+	const LocationConfig* bestMatch = NULL;
+	size_t longestMatchLength = 0;
+
+	for (std::vector<LocationConfig>::const_iterator it = _locations.begin(); it != _locations.end(); ++it) {
+		std::string locPath = it->getPath();
+		if (uri.find(locPath) == 0) {
+			if (locPath.length() > longestMatchLength) {
+				longestMatchLength = locPath.length();
+				bestMatch = &(*it);
+			}
+		}
+	}
+	return bestMatch;
+}

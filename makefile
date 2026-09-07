@@ -1,13 +1,10 @@
-
-NAME		= webserv
-CXX			= c++
-CXXFLAGS	= -Wall -Wextra -Werror -std=c++98
-
-OBJ_DIR		= obj
-
-SRCS		= $(shell find . -type f -name "*.cpp" -not -path "./$(OBJ_DIR)/*")
-
-OBJS		= $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(SRCS))
+NAME = webserv
+CXX = c++
+CXXFLAGS = -Wall -Wextra -Werror -std=c++98 -MMD -MP
+OBJ_DIR = obj
+SRCS = $(shell find . -type f -name "*.cpp" -not -path "./$(OBJ_DIR)/*")
+OBJS = $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(SRCS))
+DEPS = $(OBJS:.o=.d)
 
 all: $(NAME)
 
@@ -30,5 +27,7 @@ fclean: clean
 	rm -f $(NAME)
 
 re: fclean all
+
+-include $(DEPS)
 
 .PHONY: all clean fclean re

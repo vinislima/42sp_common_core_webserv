@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   LocationConfig.hpp                                 :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: yvieira- <yvieira-@student.42.fr>          +#+  +:+       +#+        */
+/*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/09/06 12:06:17 by yvieira-          #+#    #+#             */
-/*   Updated: 2026/09/06 12:06:18 by yvieira-         ###   ########.fr       */
+/*   Updated: 2026/09/07 11:29:46 by vinda-si         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -17,15 +17,30 @@
 #include <vector>
 
 class LocationConfig {
+public:
+    // "on"/"off" in the .conf set it explicitly; the directive being absent
+    // from the location leaves it as INHERIT, so Response::build() falls
+    // back to the parent server's value — same as root/index already do
+    // with "empty = inherit".
+    enum AutoindexState { AUTOINDEX_INHERIT, AUTOINDEX_ON, AUTOINDEX_OFF };
+
 private:
     std::string                 _path;
     std::string                 _root;
-    bool                        _autoindex;
+    AutoindexState               _autoindex;
     std::vector<std::string>    _index;
     int                         _redirectCode;
     std::string                 _redirectUrl;
-    
-    // Variáveis do CGI e Upload
+
+    // client_max_body_size: 0 is a legitimate configured value ("no limit"),
+    // so it can't double as the "not set" sentinel the way root/index use an
+    // empty string — a separate flag tracks whether the directive was ever
+    // seen in this location's block, letting Server.cpp fall back to the
+    // parent server's limit when it wasn't.
+    size_t                      _clientMaxBodySize;
+    bool                        _hasClientMaxBodySize;
+
+    // CGI and Upload variables
     std::string                 _cgiExt;
     std::string                 _cgiPath;
     std::string                 _uploadStore;
@@ -43,6 +58,7 @@ public:
     void setAutoindex(bool autoindex);
     void addIndex(const std::string& index);
     void setRedirect(int code, const std::string& url);
+    void setClientMaxBodySize(size_t size);
     
     void setCgiExt(const std::string& ext);
     void setCgiPath(const std::string& path);
@@ -54,8 +70,10 @@ public:
     std::string getRedirectUrl() const;
     std::string getPath() const;
     std::string getRoot() const;
-    bool getAutoindex() const;
+    AutoindexState getAutoindexState() const;
     std::vector<std::string> getIndex() const;
+    size_t getClientMaxBodySize() const;
+    bool hasClientMaxBodySize() const;
     
     std::string getCgiExt() const;
     std::string getCgiPath() const;

@@ -33,6 +33,8 @@ private:
 	bool	_bodyAuthorized;
 	size_t	_maxBodySize;
 	int		_errorCode;
+	size_t	_consumedBytes;    // bytes of _rawRequest used by THIS request (for Keep-Alive/pipelining)
+	size_t	_bodyBytesConsumed; // same, but just the body part (filled in by _parseBody/_parseChunkedBody)
 	void _parseRequestLine(const std::string& line);
 	void _parseHeaders(const std::string& headersBlock);
 	void _parseBody(const std::string& bodyBlock);
@@ -46,12 +48,14 @@ public:
 	~Request();
 
 	void	appendToRaw(const std::string& data);
+	void	setBody(const std::string& body) { _body = body; }
 	void	setBodyAuthorized(bool auth) { _bodyAuthorized = auth; }
 	void	setMaxBodySize(size_t size) { _maxBodySize = size; }
 	void	parseHeadersOnly();
 	void	parseBodyOnly();
 	bool	isComplete() const;
 	bool	areHeadersParsed() const { return _headersParsed; }
+	size_t	getRawLength() const { return _rawRequest.length(); } // for the header-size guard in Server::_parseClientRequest
 	bool	isBodyAuthorized() const { return _bodyAuthorized; }
 	size_t	getMaxBodySize() const { return _maxBodySize; }
 	int		getErrorCode() const { return _errorCode; }
@@ -63,9 +67,15 @@ public:
 	std::string getMethod() const;
 	std::string getUri() const;
 	std::string getVersion() const;
-	std::string getBody() const;
+	const std::string& getBody() const; // by reference: callers that write it out in chunks (Server.cpp) must not copy the whole body on every poll() event
 	std::string getHeader(const std::string& key) const;
 	std::map<std::string, std::string> getHeaders() const;
+
+	// Keep-Alive / pipelining: bytes of _rawRequest left over after this
+	// request (already belong to the next one, if the client already sent
+	// them) and whether this connection should stay open for the next request.
+	std::string extractLeftoverRaw() const;
+	bool wantsKeepAlive() const;
 };
 
 #endif
