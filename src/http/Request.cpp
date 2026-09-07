@@ -25,7 +25,7 @@ static std::string toLowerCopy(const std::string& s) {
 	return result;
 }
 
-Request::Request() : _isComplete(false), _headersParsed(false), _bodyAuthorized(false), _maxBodySize(0), _errorCode(0) {}
+Request::Request() : _isComplete(false), _headersParsed(false), _bodyAuthorized(false), _maxBodySize(0), _errorCode(0), _consumedBytes(0), _bodyBytesConsumed(0) {}
 Request::Request(const std::string& rawRequest) : _rawRequest(rawRequest), _isComplete(false) {}
 Request::Request(const Request& src) { *this = src; }
 Request& Request::operator=(const Request& rhs) {
@@ -41,6 +41,8 @@ Request& Request::operator=(const Request& rhs) {
 		_bodyAuthorized = rhs._bodyAuthorized;
 		_maxBodySize = rhs._maxBodySize;
 		_errorCode = rhs._errorCode;
+		_consumedBytes = rhs._consumedBytes;
+		_bodyBytesConsumed = rhs._bodyBytesConsumed;
 	}
 	return *this;
 }
@@ -64,15 +66,31 @@ void Request::parseBodyOnly() {
 	size_t endOfHeaders = _rawRequest.find("\r\n\r\n");
 	size_t startOfBody = endOfHeaders + 4;
 
-	if (startOfBody < _rawRequest.length()) {
-		try {
-			_parseBody(_rawRequest.substr(startOfBody));
-		} catch (const std::exception& e) {
-			throw;
-		}
-	} else if (_method == "GET" || _method == "DELETE" || 
-			(getHeader("Content-Length").empty() && getHeader("Transfer-Encoding") != "chunked")) {
+	// GET/DELETE (ou qualquer request sem Content-Length/chunked) não tem
+	// corpo — precisa terminar aqui SEM tentar consumir o que vier depois
+	// dos headers, senão em Keep-Alive/pipelining isso comeria os bytes da
+	// PRÓXIMA requisição já bufferizada, tratando-os como corpo desta.
+	bool noBodyExpected = (_method == "GET" || _method == "DELETE") ||
+			(getHeader("Content-Length").empty() && getHeader("Transfer-Encoding") != "chunked");
+
+	if (noBodyExpected) {
 		_isComplete = true;
+		_consumedBytes = startOfBody;
+		return;
+	}
+
+	if (startOfBody >= _rawRequest.length()) {
+		return; // corpo esperado, mas ainda não chegou nada dele — aguarda mais recv()
+	}
+
+	try {
+		_parseBody(_rawRequest.substr(startOfBody));
+	} catch (const std::exception& e) {
+		throw;
+	}
+
+	if (_isComplete && _errorCode == 0) {
+		_consumedBytes = startOfBody + _bodyBytesConsumed;
 	}
 }
 
@@ -119,6 +137,7 @@ void Request::_parseBody(const std::string& bodyBlock) {
 				throw std::runtime_error("Body incompleto");
 			}
 			_body = bodyBlock.substr(0, len);
+			_bodyBytesConsumed = len;
 			_isComplete = true;
 		} else {
 			if (bodyBlock.length() > _maxBodySize && _maxBodySize > 0) {
@@ -126,6 +145,7 @@ void Request::_parseBody(const std::string& bodyBlock) {
 				return;
 			}
 			_body = bodyBlock;
+			_bodyBytesConsumed = bodyBlock.length();
 			_isComplete = true;
 		}
 	}
@@ -136,29 +156,40 @@ void Request::_parseChunkedBody(const std::string& bodyBlock) {
 
 	while (pos < bodyBlock.length()) {
 		size_t endOfLine = bodyBlock.find("\r\n", pos);
-		if (endOfLine == std::string::npos) break; 
-		
+		if (endOfLine == std::string::npos) throw std::runtime_error("Chunk incompleto");
+
 		std::string hexStr = bodyBlock.substr(pos, endOfLine - pos);
 		long chunkSize = std::strtol(hexStr.c_str(), NULL, 16);
-		
-		if (chunkSize == 0) {
-			_body = tempBody;
-			_isComplete = true;
-			break;
-		}
-		pos = endOfLine + 2;
+		size_t chunkDataStart = endOfLine + 2;
 
-		if (pos + chunkSize > bodyBlock.length()) {
+		if (chunkSize == 0) {
+			// Chunk terminador ("0\r\n"): falta consumir o "\r\n" final que
+			// fecha o corpo chunked (ignoramos trailers, se houver algum).
+			// Sem isso, esses bytes ficariam "perdidos" no meio do buffer e
+			// contaminariam o pipelining da próxima requisição em Keep-Alive.
+			size_t terminatorEnd = bodyBlock.find("\r\n", chunkDataStart);
+			if (terminatorEnd == std::string::npos) {
+				throw std::runtime_error("Chunk incompleto");
+			}
+			_body = tempBody;
+			_bodyBytesConsumed = terminatorEnd + 2;
+			_isComplete = true;
+			return;
+		}
+
+		if (chunkDataStart + static_cast<size_t>(chunkSize) + 2 > bodyBlock.length()) {
 			throw std::runtime_error("Chunk incompleto");
 		}
-		tempBody += bodyBlock.substr(pos, chunkSize);
+		tempBody += bodyBlock.substr(chunkDataStart, chunkSize);
 
 		if (tempBody.length() > _maxBodySize && _maxBodySize > 0) {
 			setErrorCode(413);
 			return;
 		}
-		pos += chunkSize + 2;
+		pos = chunkDataStart + chunkSize + 2;
 	}
+
+	throw std::runtime_error("Chunk incompleto");
 }
 
 std::string Request::getMethod() const { return _method; }
@@ -171,4 +202,26 @@ std::string Request::getHeader(const std::string& key) const {
 }
 std::map<std::string, std::string> Request::getHeaders() const {
 	return _headers;
+}
+
+std::string Request::extractLeftoverRaw() const {
+	if (_consumedBytes >= _rawRequest.length()) return "";
+	return _rawRequest.substr(_consumedBytes);
+}
+
+bool Request::wantsKeepAlive() const {
+	// Erro grave de parsing (400 malformado, 413 corpo grande demais): não dá
+	// pra confiar em _consumedBytes pra achar o limite da próxima requisição,
+	// então fecha a conexão por segurança.
+	if (_errorCode != 0) return false;
+
+	std::string connection = toLowerCopy(getHeader("Connection"));
+
+	if (_version == "HTTP/1.1") {
+		return connection != "close";
+	}
+	if (_version == "HTTP/1.0") {
+		return connection == "keep-alive";
+	}
+	return false; // versão desconhecida: mais seguro fechar
 }

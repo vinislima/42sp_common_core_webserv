@@ -174,7 +174,7 @@ const ServerConfig* Server::_matchConfig(int clientFd, const std::string& hostHe
 bool Server::_handleClientRead(int clientFd) {
     char buffer[4096];
     ssize_t bytesRead = recv(clientFd, buffer, sizeof(buffer) - 1, 0);
-    
+
     if (bytesRead <= 0) return false;
 
     buffer[bytesRead] = '\0';
@@ -182,22 +182,35 @@ bool Server::_handleClientRead(int clientFd) {
     client.req.appendToRaw(std::string(buffer, bytesRead));
     client.updateActivity();
 
+    _parseClientRequest(clientFd);
+
+    return true;
+}
+
+// Extraído de _handleClientRead pra ser reaproveitado no reset de Keep-Alive:
+// quando uma 2ª requisição já chegou pipelined (junto com a 1ª, no mesmo
+// recv()), os bytes dela já estão no buffer sem que um novo recv() aconteça
+// — então esse parsing precisa poder ser chamado de novo sem depender de
+// outro evento de leitura no socket.
+void Server::_parseClientRequest(int clientFd) {
+    Client& client = _clients[clientFd];
+
     try {
         if (!client.req.areHeadersParsed()) {
             client.req.parseHeadersOnly();
-            
+
             if (client.req.areHeadersParsed() && !client.req.isBodyAuthorized()) {
                 std::string hostHeader = client.req.getHeader("Host");
                 size_t colonPos = hostHeader.find(':');
                 if(colonPos != std::string::npos) {
                     hostHeader = hostHeader.substr(0, colonPos);
                 }
-                
+
                 const ServerConfig* matchedConfig = _matchConfig(clientFd, hostHeader);
 
                 size_t maxBodySize = matchedConfig->getClientMaxBodySize();
                 client.req.setMaxBodySize(maxBodySize);
-                
+
                 std::string cl = client.req.getHeader("Content-Length");
                 if (!cl.empty()) {
                     size_t contentLen = std::strtoul(cl.c_str(), NULL, 10);
@@ -208,22 +221,19 @@ bool Server::_handleClientRead(int clientFd) {
                 client.req.setBodyAuthorized(true);
             }
         }
-        
+
         if (client.req.areHeadersParsed() && client.req.getErrorCode() == 0) {
             client.req.parseBodyOnly();
         }
-        
+
     } catch (const std::exception& e) {
         std::string errorMsg = e.what();
         if (errorMsg == "Body incompleto" || errorMsg == "Chunk incompleto") {
-            return true; 
+            return;
         }
         std::cerr << "[ERRO] Requisicao malformada ou invalida: " << errorMsg << "\n";
         client.req.setErrorCode(400);
-        return true;
     }
-
-    return true;
 }
 
 bool Server::_handleClientWrite(int clientFd) {
@@ -346,7 +356,32 @@ bool Server::_handleClientWrite(int clientFd) {
                 
                 if (client.bytesSent >= client.responseBuffer.length()) {
                     std::cout << "[HTTP] Resposta completa enviada com sucesso ao FD " << clientFd << "\n";
-                    return false; 
+
+                    if (!client.req.wantsKeepAlive()) {
+                        return false; // HTTP/1.0 default, Connection: close explícito, ou erro grave de parsing
+                    }
+
+                    // Keep-Alive: reseta o estado do Client pra aceitar uma nova
+                    // requisição na MESMA conexão TCP, preservando qualquer byte
+                    // que já tenha chegado pipelined (2ª requisição mandada pelo
+                    // cliente sem esperar a resposta da 1ª).
+                    std::string leftover = client.req.extractLeftoverRaw();
+                    client = Client();
+                    client.updateActivity();
+
+                    if (!leftover.empty()) {
+                        client.req.appendToRaw(leftover);
+                        _parseClientRequest(clientFd);
+                    }
+
+                    for (size_t k = 0; k < _pollFds.size(); ++k) {
+                        if (_pollFds[k].fd == clientFd) {
+                            bool pipelinedReady = client.req.isComplete() && !client.isCgi && !client.isFile;
+                            _pollFds[k].events = pipelinedReady ? POLLOUT : POLLIN;
+                            break;
+                        }
+                    }
+                    return true;
                 }
                 return true;
             }

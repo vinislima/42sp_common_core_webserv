@@ -43,6 +43,7 @@ private:
 	bool	_isListenSocket(int fd);
 	void	_acceptNewConnection(int listenFd);
 	bool	_handleClientRead(int clientFd);
+	void	_parseClientRequest(int clientFd);
 	bool	_handleClientWrite(int clientFd);
 	void	_runEventLoop();
 	void	_checkTimeouts();
