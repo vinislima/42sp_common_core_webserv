@@ -31,7 +31,15 @@ private:
     std::vector<std::string>    _index;
     int                         _redirectCode;
     std::string                 _redirectUrl;
-    
+
+    // client_max_body_size: 0 is a legitimate configured value ("no limit"),
+    // so it can't double as the "not set" sentinel the way root/index use an
+    // empty string — a separate flag tracks whether the directive was ever
+    // seen in this location's block, letting Server.cpp fall back to the
+    // parent server's limit when it wasn't.
+    size_t                      _clientMaxBodySize;
+    bool                        _hasClientMaxBodySize;
+
     // CGI and Upload variables
     std::string                 _cgiExt;
     std::string                 _cgiPath;
@@ -50,6 +58,7 @@ public:
     void setAutoindex(bool autoindex);
     void addIndex(const std::string& index);
     void setRedirect(int code, const std::string& url);
+    void setClientMaxBodySize(size_t size);
     
     void setCgiExt(const std::string& ext);
     void setCgiPath(const std::string& path);
@@ -63,6 +72,8 @@ public:
     std::string getRoot() const;
     AutoindexState getAutoindexState() const;
     std::vector<std::string> getIndex() const;
+    size_t getClientMaxBodySize() const;
+    bool hasClientMaxBodySize() const;
     
     std::string getCgiExt() const;
     std::string getCgiPath() const;

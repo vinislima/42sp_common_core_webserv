@@ -36,7 +36,7 @@ private:
     void    _parseListen(ServerConfig& server, size_t& i);
     void    _parseServerName(ServerConfig& server, size_t& i);
     void    _parseErrorPage(ServerConfig& server, size_t& i);
-    void    _parseClientMaxBodySize(ServerConfig& server, size_t& i);
+    void    _parseClientMaxBodySize(size_t& outSize, size_t& i);
 
     void    _parseRoot(std::string& outRoot, size_t& i);
     void    _parseAutoindex(bool& outAutoindex, size_t& i);

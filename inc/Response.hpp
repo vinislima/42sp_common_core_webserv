@@ -39,7 +39,6 @@ private:
     void _initStatusMessages();
     void _generateRawResponse();
     std::string _getContentType(const std::string& path) const;
-    const LocationConfig* _getBestMatchLocation(const std::string& uri, const ServerConfig& config) const;
     bool _normalizeUri(const std::string& uri, std::string& out) const;
     bool _parseMultipart(const std::string& body, const std::string& boundary,
                           std::string& outFilename, std::string& outContent) const;
