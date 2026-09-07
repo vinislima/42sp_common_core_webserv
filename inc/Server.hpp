@@ -46,7 +46,9 @@ private:
 	bool	_handleClientWrite(int clientFd);
 	void	_runEventLoop();
 	void	_checkTimeouts();
+	void	_checkCgiTimeouts();
 	void	_closeClient(int clientFd, size_t pollIdx);
+	void	_erasePollFd(int fd);
 	const ServerConfig*	_matchConfig(int clientFd, const std::string& hostHeader) const;
 
 
