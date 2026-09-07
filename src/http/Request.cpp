@@ -59,6 +59,15 @@ void Request::parseHeadersOnly() {
 	size_t endOfFirstLine = _rawRequest.find("\r\n");
 	_parseRequestLine(_rawRequest.substr(0, endOfFirstLine));
 	_parseHeaders(_rawRequest.substr(endOfFirstLine + 2, endOfHeaders - (endOfFirstLine + 2)));
+
+	// RFC 7230 §5.4: Host is mandatory in HTTP/1.1 (it predates virtual
+	// hosting in HTTP/1.0, where it stays optional). A request claiming to
+	// be HTTP/1.1 without one is malformed.
+	if (_version == "HTTP/1.1" && getHeader("Host").empty()) {
+		setErrorCode(400);
+		return;
+	}
+
 	_headersParsed = true;
 }
 
