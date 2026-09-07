@@ -13,10 +13,10 @@
 #include "../../inc/Request.hpp"
 #include <cctype>
 
-// RFC 7230: nomes de header HTTP são case-insensitive ("Host" == "host" ==
-// "HOST"). Normalizamos pra minúsculo tanto ao guardar quanto ao consultar,
-// senão um cliente que manda "host:" minúsculo (ou qualquer variação de
-// caixa) nunca casa com os getHeader("Host") espalhados pelo código.
+// RFC 7230: HTTP header names are case-insensitive ("Host" == "host" ==
+// "HOST"). We normalize to lowercase both when storing and when looking up,
+// otherwise a client sending "host:" lowercase (or any other casing) would
+// never match the getHeader("Host") calls scattered through the code.
 static std::string toLowerCopy(const std::string& s) {
 	std::string result = s;
 	for (size_t i = 0; i < result.length(); ++i) {
@@ -66,10 +66,11 @@ void Request::parseBodyOnly() {
 	size_t endOfHeaders = _rawRequest.find("\r\n\r\n");
 	size_t startOfBody = endOfHeaders + 4;
 
-	// GET/DELETE (ou qualquer request sem Content-Length/chunked) não tem
-	// corpo — precisa terminar aqui SEM tentar consumir o que vier depois
-	// dos headers, senão em Keep-Alive/pipelining isso comeria os bytes da
-	// PRÓXIMA requisição já bufferizada, tratando-os como corpo desta.
+	// GET/DELETE (or any request without Content-Length/chunked) has no
+	// body — must finish here WITHOUT trying to consume whatever comes
+	// after the headers, otherwise on Keep-Alive/pipelining this would eat
+	// the bytes of the NEXT already-buffered request, treating them as
+	// this one's body.
 	bool noBodyExpected = (_method == "GET" || _method == "DELETE") ||
 			(getHeader("Content-Length").empty() && getHeader("Transfer-Encoding") != "chunked");
 
@@ -80,7 +81,7 @@ void Request::parseBodyOnly() {
 	}
 
 	if (startOfBody >= _rawRequest.length()) {
-		return; // corpo esperado, mas ainda não chegou nada dele — aguarda mais recv()
+		return; // body expected, but none of it has arrived yet — wait for more recv()
 	}
 
 	try {
@@ -163,10 +164,11 @@ void Request::_parseChunkedBody(const std::string& bodyBlock) {
 		size_t chunkDataStart = endOfLine + 2;
 
 		if (chunkSize == 0) {
-			// Chunk terminador ("0\r\n"): falta consumir o "\r\n" final que
-			// fecha o corpo chunked (ignoramos trailers, se houver algum).
-			// Sem isso, esses bytes ficariam "perdidos" no meio do buffer e
-			// contaminariam o pipelining da próxima requisição em Keep-Alive.
+			// Terminating chunk ("0\r\n"): still need to consume the final
+			// "\r\n" that closes the chunked body (trailers, if any, are
+			// ignored). Without this, those bytes would be "lost" in the
+			// middle of the buffer and would corrupt Keep-Alive pipelining
+			// of the next request.
 			size_t terminatorEnd = bodyBlock.find("\r\n", chunkDataStart);
 			if (terminatorEnd == std::string::npos) {
 				throw std::runtime_error("Chunk incompleto");
@@ -210,9 +212,9 @@ std::string Request::extractLeftoverRaw() const {
 }
 
 bool Request::wantsKeepAlive() const {
-	// Erro grave de parsing (400 malformado, 413 corpo grande demais): não dá
-	// pra confiar em _consumedBytes pra achar o limite da próxima requisição,
-	// então fecha a conexão por segurança.
+	// Grave parsing error (malformed -> 400, body too large -> 413): we
+	// can't trust _consumedBytes to find the boundary of the next request,
+	// so close the connection to be safe.
 	if (_errorCode != 0) return false;
 
 	std::string connection = toLowerCopy(getHeader("Connection"));
@@ -223,5 +225,5 @@ bool Request::wantsKeepAlive() const {
 	if (_version == "HTTP/1.0") {
 		return connection == "keep-alive";
 	}
-	return false; // versão desconhecida: mais seguro fechar
+	return false; // unknown version: safer to close
 }

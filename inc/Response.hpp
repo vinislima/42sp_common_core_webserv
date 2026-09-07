@@ -32,7 +32,7 @@ private:
     int _cgiReadFd;
     int _cgiWriteFd;
     
-    // Novas variáveis
+    // New variables
     int _fileReadFd;
     int _fileWriteFd;
 
@@ -59,7 +59,7 @@ public:
     int getCgiReadFd() const { return _cgiReadFd; }
     int getCgiWriteFd() const { return _cgiWriteFd; }
     
-    // Novos Getters
+    // New getters
     int getFileReadFd() const { return _fileReadFd; }
     int getFileWriteFd() const { return _fileWriteFd; }
     

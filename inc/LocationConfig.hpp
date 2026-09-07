@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   LocationConfig.hpp                                 :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: yvieira- <yvieira-@student.42.fr>          +#+  +:+       +#+        */
+/*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/09/06 12:06:17 by yvieira-          #+#    #+#             */
-/*   Updated: 2026/09/06 12:06:18 by yvieira-         ###   ########.fr       */
+/*   Updated: 2026/09/07 11:29:46 by vinda-si         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -17,15 +17,22 @@
 #include <vector>
 
 class LocationConfig {
+public:
+    // "on"/"off" in the .conf set it explicitly; the directive being absent
+    // from the location leaves it as INHERIT, so Response::build() falls
+    // back to the parent server's value — same as root/index already do
+    // with "empty = inherit".
+    enum AutoindexState { AUTOINDEX_INHERIT, AUTOINDEX_ON, AUTOINDEX_OFF };
+
 private:
     std::string                 _path;
     std::string                 _root;
-    bool                        _autoindex;
+    AutoindexState               _autoindex;
     std::vector<std::string>    _index;
     int                         _redirectCode;
     std::string                 _redirectUrl;
     
-    // Variáveis do CGI e Upload
+    // CGI and Upload variables
     std::string                 _cgiExt;
     std::string                 _cgiPath;
     std::string                 _uploadStore;
@@ -54,7 +61,7 @@ public:
     std::string getRedirectUrl() const;
     std::string getPath() const;
     std::string getRoot() const;
-    bool getAutoindex() const;
+    AutoindexState getAutoindexState() const;
     std::vector<std::string> getIndex() const;
     
     std::string getCgiExt() const;
