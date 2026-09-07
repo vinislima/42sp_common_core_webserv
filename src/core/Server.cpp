@@ -14,8 +14,9 @@
 #include "../../inc/Request.hpp"
 #include "../../inc/Response.hpp" 
 
-#include <sys/wait.h> 
-#include <cstdlib>    
+#include <sys/wait.h>
+#include <cstdlib>
+#include <csignal>
 
 Server::Server() {}
 
@@ -135,6 +136,15 @@ void Server::_closeClient(int clientFd, size_t pollIdx) {
     _pollFds.erase(_pollFds.begin() + pollIdx);
 }
 
+void Server::_erasePollFd(int fd) {
+    for (size_t i = 0; i < _pollFds.size(); ++i) {
+        if (_pollFds[i].fd == fd) {
+            _pollFds.erase(_pollFds.begin() + i);
+            return;
+        }
+    }
+}
+
 const ServerConfig* Server::_matchConfig(int clientFd, const std::string& hostHeader) const {
     const ServerConfig* defaultConfig = _configs.empty() ? NULL : &_configs[0];
 
@@ -244,6 +254,7 @@ bool Server::_handleClientWrite(int clientFd) {
                     client.cgiWriteFd = res.getCgiWriteFd();
                     client.cgiOutput = "";
                     client.cgiBytesWritten = 0;
+                    client.cgiStart = time(NULL);
 
                     struct pollfd pfdRead;
                     pfdRead.fd = client.cgiReadFd;
@@ -362,6 +373,54 @@ void Server::_checkTimeouts() {
             if (elapsed > TIMEOUT_SECONDS) {
                 std::cout << "[TIMEOUT] Derrubando conexao ociosa (Hanging Connection). FD: " << fd << "\n";
                 _closeClient(fd, idx);
+            }
+        }
+    }
+}
+
+// CGI travado (ex: script em loop infinito) não pode ficar preso para sempre:
+// diferente do timeout de ociosidade acima, aqui o cliente está "ativo" (esperando
+// o CGI responder), então precisa de um limite proprio baseado em quanto tempo o
+// processo filho já está rodando.
+void Server::_checkCgiTimeouts() {
+    time_t now = time(NULL);
+    const double CGI_TIMEOUT_SECONDS = 10.0;
+
+    for (std::map<int, Client>::iterator it = _clients.begin(); it != _clients.end(); ++it) {
+        int clientFd = it->first;
+        Client& client = it->second;
+
+        if (!client.isCgi) continue;
+        if (difftime(now, client.cgiStart) <= CGI_TIMEOUT_SECONDS) continue;
+
+        std::cout << "[TIMEOUT] CGI (PID " << client.cgiPid << ") excedeu " << CGI_TIMEOUT_SECONDS
+                   << "s. Encerrando processo travado. Cliente FD: " << clientFd << "\n";
+
+        kill(client.cgiPid, SIGKILL);
+        waitpid(client.cgiPid, NULL, 0);
+
+        if (client.cgiReadFd != -1) {
+            _erasePollFd(client.cgiReadFd);
+            _cgiToClient.erase(client.cgiReadFd);
+            close(client.cgiReadFd);
+            client.cgiReadFd = -1;
+        }
+        if (client.cgiWriteFd != -1) {
+            _erasePollFd(client.cgiWriteFd);
+            _cgiToClient.erase(client.cgiWriteFd);
+            close(client.cgiWriteFd);
+            client.cgiWriteFd = -1;
+        }
+
+        client.isCgi = false;
+        client.responseBuffer = "HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 0\r\n\r\n";
+        client.bytesSent = 0;
+        client.isReadyToSend = true;
+
+        for (size_t k = 0; k < _pollFds.size(); ++k) {
+            if (_pollFds[k].fd == clientFd) {
+                _pollFds[k].events = POLLOUT;
+                break;
             }
         }
     }
@@ -597,6 +656,7 @@ void Server::_runEventLoop() {
         }
 
         _checkTimeouts();
+        _checkCgiTimeouts();
     }
 }
 
