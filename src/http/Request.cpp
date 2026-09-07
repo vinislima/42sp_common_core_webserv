@@ -100,7 +100,22 @@ bool Request::isComplete() const { return _isComplete; }
 void Request::_parseRequestLine(const std::string& line) {
 	std::stringstream ss(line);
 	ss >> _method >> _uri >> _version;
-	if (_method.empty()) throw std::runtime_error("Invalid Request-Line");
+
+	// Must have exactly 3 tokens (method, URI, version) — a request-line
+	// with fewer leaves the missing field(s) empty (operator>> on a string
+	// sets it to "" on extraction failure), and one with more is caught below.
+	if (_method.empty() || _uri.empty() || _version.empty()) {
+		throw std::runtime_error("Invalid Request-Line: expected 3 tokens (method, URI, version)");
+	}
+
+	std::string extra;
+	if (ss >> extra) {
+		throw std::runtime_error("Invalid Request-Line: unexpected extra token after version");
+	}
+
+	if (_version != "HTTP/1.0" && _version != "HTTP/1.1") {
+		throw std::runtime_error("Invalid Request-Line: unsupported HTTP version '" + _version + "'");
+	}
 }
 
 void Request::_parseHeaders(const std::string& headersBlock) {
