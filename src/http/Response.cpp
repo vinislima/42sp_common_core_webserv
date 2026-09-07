@@ -49,10 +49,49 @@ void Response::_initStatusMessages() {
 }
 
 std::string Response::_getContentType(const std::string& path) const {
-	if (path.find(".html") != std::string::npos) return "text/html";
-	if (path.find(".css") != std::string::npos) return "text/css";
-	if (path.find(".png") != std::string::npos) return "image/png";
-	return "text/plain";
+	// A previous version matched by path.find(".html") — a substring search
+	// anywhere in the path, not the actual extension (so "foo.htmlbak" would
+	// also match ".html", and ".HTML" wouldn't match at all). This looks up
+	// the real extension (after the last '/', lowercased) in a proper table.
+	static std::map<std::string, std::string> mimeTypes;
+	if (mimeTypes.empty()) {
+		mimeTypes[".html"] = "text/html";
+		mimeTypes[".htm"] = "text/html";
+		mimeTypes[".css"] = "text/css";
+		mimeTypes[".js"] = "application/javascript";
+		mimeTypes[".json"] = "application/json";
+		mimeTypes[".xml"] = "application/xml";
+		mimeTypes[".txt"] = "text/plain";
+		mimeTypes[".pdf"] = "application/pdf";
+		mimeTypes[".zip"] = "application/zip";
+		mimeTypes[".png"] = "image/png";
+		mimeTypes[".jpg"] = "image/jpeg";
+		mimeTypes[".jpeg"] = "image/jpeg";
+		mimeTypes[".gif"] = "image/gif";
+		mimeTypes[".svg"] = "image/svg+xml";
+		mimeTypes[".ico"] = "image/x-icon";
+		mimeTypes[".webp"] = "image/webp";
+		mimeTypes[".mp4"] = "video/mp4";
+		mimeTypes[".webm"] = "video/webm";
+		mimeTypes[".woff"] = "font/woff";
+		mimeTypes[".woff2"] = "font/woff2";
+		mimeTypes[".ttf"] = "font/ttf";
+	}
+
+	size_t lastSlash = path.find_last_of('/');
+	size_t dotPos = path.find_last_of('.');
+	bool hasExtension = dotPos != std::string::npos && (lastSlash == std::string::npos || dotPos > lastSlash);
+
+	std::string ext;
+	if (hasExtension) {
+		ext = path.substr(dotPos);
+		for (size_t i = 0; i < ext.length(); ++i) {
+			ext[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(ext[i])));
+		}
+	}
+
+	std::map<std::string, std::string>::const_iterator it = mimeTypes.find(ext);
+	return (it != mimeTypes.end()) ? it->second : "text/plain";
 }
 
 void Response::setStatusCode(int code) {
