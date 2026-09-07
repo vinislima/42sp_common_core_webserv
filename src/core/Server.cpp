@@ -29,6 +29,8 @@ Server& Server::operator=(const Server& rhs) {
     if (this != &rhs) {
         this->_configs = rhs._configs;
         this->_listenSockets = rhs._listenSockets;
+        this->_listenFdToPort = rhs._listenFdToPort;
+        this->_clientToListenFd = rhs._clientToListenFd;
     }
     return *this;
 }
@@ -85,13 +87,14 @@ void Server::_setupSockets() {
             throw std::runtime_error("Erro: Falha no listen.");
 
         _listenSockets.push_back(sockfd);
+        _listenFdToPort[sockfd] = _configs[i].getPort();
 
         struct pollfd pfd;
         pfd.fd = sockfd;
         pfd.events = POLLIN;
         pfd.revents = 0;
         _pollFds.push_back(pfd);
-        
+
         boundAddresses.push_back(currentAddr);
         std::cout << "[SUCESSO] Servidor ouvindo em " << currentAddr << "\n";
     }
@@ -120,8 +123,42 @@ void Server::_acceptNewConnection(int listenFd) {
     _pollFds.push_back(pfd);
 
     _clients[clientFd] = Client();
+    _clientToListenFd[clientFd] = listenFd;
 
     std::cout << "[REDE] Novo cliente conectado! FD: " << clientFd << " IP: " << inet_ntoa(clientAddr.sin_addr) << "\n";
+}
+
+void Server::_closeClient(int clientFd, size_t pollIdx) {
+    close(clientFd);
+    _clients.erase(clientFd);
+    _clientToListenFd.erase(clientFd);
+    _pollFds.erase(_pollFds.begin() + pollIdx);
+}
+
+const ServerConfig* Server::_matchConfig(int clientFd, const std::string& hostHeader) const {
+    const ServerConfig* defaultConfig = _configs.empty() ? NULL : &_configs[0];
+
+    std::map<int, int>::const_iterator listenIt = _clientToListenFd.find(clientFd);
+    if (listenIt == _clientToListenFd.end()) return defaultConfig;
+
+    std::map<int, int>::const_iterator portIt = _listenFdToPort.find(listenIt->second);
+    if (portIt == _listenFdToPort.end()) return defaultConfig;
+    int clientPort = portIt->second;
+
+    const ServerConfig* firstOnPort = NULL;
+    for (size_t i = 0; i < _configs.size(); ++i) {
+        if (_configs[i].getPort() != clientPort) continue;
+        if (!firstOnPort) firstOnPort = &_configs[i];
+
+        std::vector<std::string> names = _configs[i].getServerNames();
+        for (size_t j = 0; j < names.size(); ++j) {
+            if (names[j] == hostHeader) return &_configs[i];
+        }
+    }
+
+    // Nenhum server_name bateu: cai no primeiro server{} que escuta nessa porta
+    // (comportamento padrão de "default server" por porta, igual ao nginx).
+    return firstOnPort ? firstOnPort : defaultConfig;
 }
 
 bool Server::_handleClientRead(int clientFd) {
@@ -146,22 +183,8 @@ bool Server::_handleClientRead(int clientFd) {
                     hostHeader = hostHeader.substr(0, colonPos);
                 }
                 
-                const ServerConfig* matchedConfig = &_configs[0];
-                for (size_t i = 0; i < _configs.size(); ++i) {
-                    std::vector<std::string> names = _configs[i].getServerNames();
-                    bool found = false;
-                    for (size_t j = 0; j < names.size(); ++j) {
-                        if (names[j] == hostHeader) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) {
-                        matchedConfig = &_configs[i];
-                        break;
-                    }
-                }
-                
+                const ServerConfig* matchedConfig = _matchConfig(clientFd, hostHeader);
+
                 size_t maxBodySize = matchedConfig->getClientMaxBodySize();
                 client.req.setMaxBodySize(maxBodySize);
                 
@@ -207,22 +230,8 @@ bool Server::_handleClientWrite(int clientFd) {
                     hostHeader = hostHeader.substr(0, colonPos);
                 }
                 
-                const ServerConfig* matchedConfig = &_configs[0];
-                for (size_t i = 0; i < _configs.size(); ++i) {
-                    std::vector<std::string> names = _configs[i].getServerNames();
-                    bool found = false;
-                    for (size_t j = 0; j < names.size(); ++j) {
-                        if (names[j] == hostHeader) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) {
-                        matchedConfig = &_configs[i];
-                        break;
-                    }
-                }
-                
+                const ServerConfig* matchedConfig = _matchConfig(clientFd, hostHeader);
+
                 res.build(client.req, *matchedConfig);
                 
                 // ==============================================================
@@ -352,9 +361,7 @@ void Server::_checkTimeouts() {
             double elapsed = difftime(now, _clients[fd].lastActivity);
             if (elapsed > TIMEOUT_SECONDS) {
                 std::cout << "[TIMEOUT] Derrubando conexao ociosa (Hanging Connection). FD: " << fd << "\n";
-                close(fd);
-                _clients.erase(fd);
-                _pollFds.erase(_pollFds.begin() + idx);
+                _closeClient(fd, idx);
             }
         }
     }
@@ -553,9 +560,7 @@ void Server::_runEventLoop() {
             // =================================================================
             if (_pollFds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
                 std::cout << "[REDE] Erro/HUP no cliente. FD: " << _pollFds[i].fd << "\n";
-                close(_pollFds[i].fd);
-                _clients.erase(_pollFds[i].fd); 
-                _pollFds.erase(_pollFds.begin() + i);
+                _closeClient(_pollFds[i].fd, i);
                 i--;
                 continue;
             }
@@ -567,9 +572,7 @@ void Server::_runEventLoop() {
                     bool keepAlive = _handleClientRead(_pollFds[i].fd);
                     if (!keepAlive) {
                         std::cout << "[REDE] Cliente desconectado na leitura. FD: " << _pollFds[i].fd << "\n";
-                        close(_pollFds[i].fd);
-                        _clients.erase(_pollFds[i].fd);
-                        _pollFds.erase(_pollFds.begin() + i);
+                        _closeClient(_pollFds[i].fd, i);
                         i--;
                         continue;
                     } else {
@@ -585,9 +588,7 @@ void Server::_runEventLoop() {
                     bool keepAlive = _handleClientWrite(_pollFds[i].fd);
                     if (!keepAlive) {
                         std::cout << "[REDE] Fechando conexao (fim da requisicao). FD: " << _pollFds[i].fd << "\n";
-                        close(_pollFds[i].fd);
-                        _clients.erase(_pollFds[i].fd); 
-                        _pollFds.erase(_pollFds.begin() + i);
+                        _closeClient(_pollFds[i].fd, i);
                         i--;
                         continue;
                     }
