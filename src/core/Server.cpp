@@ -14,8 +14,9 @@
 #include "../../inc/Request.hpp"
 #include "../../inc/Response.hpp" 
 
-#include <sys/wait.h> 
-#include <cstdlib>    
+#include <sys/wait.h>
+#include <cstdlib>
+#include <csignal>
 
 Server::Server() {}
 
@@ -29,6 +30,8 @@ Server& Server::operator=(const Server& rhs) {
     if (this != &rhs) {
         this->_configs = rhs._configs;
         this->_listenSockets = rhs._listenSockets;
+        this->_listenFdToPort = rhs._listenFdToPort;
+        this->_clientToListenFd = rhs._clientToListenFd;
     }
     return *this;
 }
@@ -85,13 +88,14 @@ void Server::_setupSockets() {
             throw std::runtime_error("Erro: Falha no listen.");
 
         _listenSockets.push_back(sockfd);
+        _listenFdToPort[sockfd] = _configs[i].getPort();
 
         struct pollfd pfd;
         pfd.fd = sockfd;
         pfd.events = POLLIN;
         pfd.revents = 0;
         _pollFds.push_back(pfd);
-        
+
         boundAddresses.push_back(currentAddr);
         std::cout << "[SUCESSO] Servidor ouvindo em " << currentAddr << "\n";
     }
@@ -120,8 +124,51 @@ void Server::_acceptNewConnection(int listenFd) {
     _pollFds.push_back(pfd);
 
     _clients[clientFd] = Client();
+    _clientToListenFd[clientFd] = listenFd;
 
     std::cout << "[REDE] Novo cliente conectado! FD: " << clientFd << " IP: " << inet_ntoa(clientAddr.sin_addr) << "\n";
+}
+
+void Server::_closeClient(int clientFd, size_t pollIdx) {
+    close(clientFd);
+    _clients.erase(clientFd);
+    _clientToListenFd.erase(clientFd);
+    _pollFds.erase(_pollFds.begin() + pollIdx);
+}
+
+void Server::_erasePollFd(int fd) {
+    for (size_t i = 0; i < _pollFds.size(); ++i) {
+        if (_pollFds[i].fd == fd) {
+            _pollFds.erase(_pollFds.begin() + i);
+            return;
+        }
+    }
+}
+
+const ServerConfig* Server::_matchConfig(int clientFd, const std::string& hostHeader) const {
+    const ServerConfig* defaultConfig = _configs.empty() ? NULL : &_configs[0];
+
+    std::map<int, int>::const_iterator listenIt = _clientToListenFd.find(clientFd);
+    if (listenIt == _clientToListenFd.end()) return defaultConfig;
+
+    std::map<int, int>::const_iterator portIt = _listenFdToPort.find(listenIt->second);
+    if (portIt == _listenFdToPort.end()) return defaultConfig;
+    int clientPort = portIt->second;
+
+    const ServerConfig* firstOnPort = NULL;
+    for (size_t i = 0; i < _configs.size(); ++i) {
+        if (_configs[i].getPort() != clientPort) continue;
+        if (!firstOnPort) firstOnPort = &_configs[i];
+
+        std::vector<std::string> names = _configs[i].getServerNames();
+        for (size_t j = 0; j < names.size(); ++j) {
+            if (names[j] == hostHeader) return &_configs[i];
+        }
+    }
+
+    // Nenhum server_name bateu: cai no primeiro server{} que escuta nessa porta
+    // (comportamento padrão de "default server" por porta, igual ao nginx).
+    return firstOnPort ? firstOnPort : defaultConfig;
 }
 
 bool Server::_handleClientRead(int clientFd) {
@@ -146,22 +193,8 @@ bool Server::_handleClientRead(int clientFd) {
                     hostHeader = hostHeader.substr(0, colonPos);
                 }
                 
-                const ServerConfig* matchedConfig = &_configs[0];
-                for (size_t i = 0; i < _configs.size(); ++i) {
-                    std::vector<std::string> names = _configs[i].getServerNames();
-                    bool found = false;
-                    for (size_t j = 0; j < names.size(); ++j) {
-                        if (names[j] == hostHeader) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) {
-                        matchedConfig = &_configs[i];
-                        break;
-                    }
-                }
-                
+                const ServerConfig* matchedConfig = _matchConfig(clientFd, hostHeader);
+
                 size_t maxBodySize = matchedConfig->getClientMaxBodySize();
                 client.req.setMaxBodySize(maxBodySize);
                 
@@ -207,22 +240,8 @@ bool Server::_handleClientWrite(int clientFd) {
                     hostHeader = hostHeader.substr(0, colonPos);
                 }
                 
-                const ServerConfig* matchedConfig = &_configs[0];
-                for (size_t i = 0; i < _configs.size(); ++i) {
-                    std::vector<std::string> names = _configs[i].getServerNames();
-                    bool found = false;
-                    for (size_t j = 0; j < names.size(); ++j) {
-                        if (names[j] == hostHeader) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) {
-                        matchedConfig = &_configs[i];
-                        break;
-                    }
-                }
-                
+                const ServerConfig* matchedConfig = _matchConfig(clientFd, hostHeader);
+
                 res.build(client.req, *matchedConfig);
                 
                 // ==============================================================
@@ -235,6 +254,7 @@ bool Server::_handleClientWrite(int clientFd) {
                     client.cgiWriteFd = res.getCgiWriteFd();
                     client.cgiOutput = "";
                     client.cgiBytesWritten = 0;
+                    client.cgiStart = time(NULL);
 
                     struct pollfd pfdRead;
                     pfdRead.fd = client.cgiReadFd;
@@ -352,9 +372,55 @@ void Server::_checkTimeouts() {
             double elapsed = difftime(now, _clients[fd].lastActivity);
             if (elapsed > TIMEOUT_SECONDS) {
                 std::cout << "[TIMEOUT] Derrubando conexao ociosa (Hanging Connection). FD: " << fd << "\n";
-                close(fd);
-                _clients.erase(fd);
-                _pollFds.erase(_pollFds.begin() + idx);
+                _closeClient(fd, idx);
+            }
+        }
+    }
+}
+
+// CGI travado (ex: script em loop infinito) não pode ficar preso para sempre:
+// diferente do timeout de ociosidade acima, aqui o cliente está "ativo" (esperando
+// o CGI responder), então precisa de um limite proprio baseado em quanto tempo o
+// processo filho já está rodando.
+void Server::_checkCgiTimeouts() {
+    time_t now = time(NULL);
+    const double CGI_TIMEOUT_SECONDS = 10.0;
+
+    for (std::map<int, Client>::iterator it = _clients.begin(); it != _clients.end(); ++it) {
+        int clientFd = it->first;
+        Client& client = it->second;
+
+        if (!client.isCgi) continue;
+        if (difftime(now, client.cgiStart) <= CGI_TIMEOUT_SECONDS) continue;
+
+        std::cout << "[TIMEOUT] CGI (PID " << client.cgiPid << ") excedeu " << CGI_TIMEOUT_SECONDS
+                   << "s. Encerrando processo travado. Cliente FD: " << clientFd << "\n";
+
+        kill(client.cgiPid, SIGKILL);
+        waitpid(client.cgiPid, NULL, 0);
+
+        if (client.cgiReadFd != -1) {
+            _erasePollFd(client.cgiReadFd);
+            _cgiToClient.erase(client.cgiReadFd);
+            close(client.cgiReadFd);
+            client.cgiReadFd = -1;
+        }
+        if (client.cgiWriteFd != -1) {
+            _erasePollFd(client.cgiWriteFd);
+            _cgiToClient.erase(client.cgiWriteFd);
+            close(client.cgiWriteFd);
+            client.cgiWriteFd = -1;
+        }
+
+        client.isCgi = false;
+        client.responseBuffer = "HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 0\r\n\r\n";
+        client.bytesSent = 0;
+        client.isReadyToSend = true;
+
+        for (size_t k = 0; k < _pollFds.size(); ++k) {
+            if (_pollFds[k].fd == clientFd) {
+                _pollFds[k].events = POLLOUT;
+                break;
             }
         }
     }
@@ -379,7 +445,8 @@ void Server::_runEventLoop() {
 
                 if (_pollFds[i].revents & (POLLERR | POLLNVAL)) {
                     if (_pollFds[i].fd == client.cgiReadFd) {
-                        waitpid(client.cgiPid, NULL, WNOHANG);
+                        int status = 0;
+                        waitpid(client.cgiPid, &status, WNOHANG);
                         close(client.cgiReadFd);
                         client.cgiReadFd = -1;
                         client.responseBuffer = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
@@ -428,36 +495,51 @@ void Server::_runEventLoop() {
                         }
 
                         if (bytesRead <= 0 || (_pollFds[i].revents & POLLHUP)) {
-                            waitpid(client.cgiPid, NULL, WNOHANG); 
+                            // Bloqueante de propósito: o pipe só dá EOF quando o processo
+                            // filho fecha o stdout, o que acontece na saída dele — logo o
+                            // wait aqui retorna quase instantaneamente. Usar WNOHANG neste
+                            // ponto arriscaria ler status=0 (processo ainda não reapeado)
+                            // e interpretar isso como "saiu com sucesso" por engano.
+                            int status = 0;
+                            waitpid(client.cgiPid, &status, 0);
                             close(_pollFds[i].fd);
                             _cgiToClient.erase(_pollFds[i].fd);
                             _pollFds.erase(_pollFds.begin() + i);
                             client.cgiReadFd = -1;
                             i--;
 
-                            size_t headerEnd = client.cgiOutput.find("\r\n\r\n");
-                            size_t headerSize = 4;
-                            if (headerEnd == std::string::npos) {
-                                headerEnd = client.cgiOutput.find("\n\n");
-                                headerSize = 2;
+                            bool cgiOk = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+
+                            if (!cgiOk) {
+                                std::cerr << "[CGI] Script (PID " << client.cgiPid << ") terminou com falha (status "
+                                           << status << "). Respondendo 500.\n";
+                                client.responseBuffer = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                            } else {
+                                size_t headerEnd = client.cgiOutput.find("\r\n\r\n");
+                                size_t headerSize = 4;
+                                if (headerEnd == std::string::npos) {
+                                    headerEnd = client.cgiOutput.find("\n\n");
+                                    headerSize = 2;
+                                }
+
+                                std::string cgiHeaders = "";
+                                std::string cgiBody = client.cgiOutput;
+
+                                if (headerEnd != std::string::npos) {
+                                    cgiHeaders = client.cgiOutput.substr(0, headerEnd);
+                                    cgiBody = client.cgiOutput.substr(headerEnd + headerSize);
+                                }
+
+                                std::ostringstream responseStream;
+                                responseStream << "HTTP/1.1 200 OK\r\n";
+                                responseStream << "Content-Length: " << cgiBody.length() << "\r\n";
+                                if (!cgiHeaders.empty()) responseStream << cgiHeaders << "\r\n\r\n";
+                                else responseStream << "Content-Type: text/html\r\n\r\n";
+                                responseStream << cgiBody;
+
+                                client.responseBuffer = responseStream.str();
                             }
 
-                            std::string cgiHeaders = "";
-                            std::string cgiBody = client.cgiOutput;
-
-                            if (headerEnd != std::string::npos) {
-                                cgiHeaders = client.cgiOutput.substr(0, headerEnd);
-                                cgiBody = client.cgiOutput.substr(headerEnd + headerSize);
-                            }
-
-                            std::ostringstream responseStream;
-                            responseStream << "HTTP/1.1 200 OK\r\n";
-                            responseStream << "Content-Length: " << cgiBody.length() << "\r\n";
-                            if (!cgiHeaders.empty()) responseStream << cgiHeaders << "\r\n\r\n";
-                            else responseStream << "Content-Type: text/html\r\n\r\n";
-                            responseStream << cgiBody;
-
-                            client.responseBuffer = responseStream.str();
                             client.bytesSent = 0;
                             client.isReadyToSend = true;
                             client.isCgi = false;
@@ -553,9 +635,7 @@ void Server::_runEventLoop() {
             // =================================================================
             if (_pollFds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
                 std::cout << "[REDE] Erro/HUP no cliente. FD: " << _pollFds[i].fd << "\n";
-                close(_pollFds[i].fd);
-                _clients.erase(_pollFds[i].fd); 
-                _pollFds.erase(_pollFds.begin() + i);
+                _closeClient(_pollFds[i].fd, i);
                 i--;
                 continue;
             }
@@ -567,9 +647,7 @@ void Server::_runEventLoop() {
                     bool keepAlive = _handleClientRead(_pollFds[i].fd);
                     if (!keepAlive) {
                         std::cout << "[REDE] Cliente desconectado na leitura. FD: " << _pollFds[i].fd << "\n";
-                        close(_pollFds[i].fd);
-                        _clients.erase(_pollFds[i].fd);
-                        _pollFds.erase(_pollFds.begin() + i);
+                        _closeClient(_pollFds[i].fd, i);
                         i--;
                         continue;
                     } else {
@@ -585,9 +663,7 @@ void Server::_runEventLoop() {
                     bool keepAlive = _handleClientWrite(_pollFds[i].fd);
                     if (!keepAlive) {
                         std::cout << "[REDE] Fechando conexao (fim da requisicao). FD: " << _pollFds[i].fd << "\n";
-                        close(_pollFds[i].fd);
-                        _clients.erase(_pollFds[i].fd); 
-                        _pollFds.erase(_pollFds.begin() + i);
+                        _closeClient(_pollFds[i].fd, i);
                         i--;
                         continue;
                     }
@@ -596,6 +672,7 @@ void Server::_runEventLoop() {
         }
 
         _checkTimeouts();
+        _checkCgiTimeouts();
     }
 }
 

@@ -11,6 +11,19 @@
 /* ************************************************************************** */
 
 #include "../../inc/Request.hpp"
+#include <cctype>
+
+// RFC 7230: nomes de header HTTP são case-insensitive ("Host" == "host" ==
+// "HOST"). Normalizamos pra minúsculo tanto ao guardar quanto ao consultar,
+// senão um cliente que manda "host:" minúsculo (ou qualquer variação de
+// caixa) nunca casa com os getHeader("Host") espalhados pelo código.
+static std::string toLowerCopy(const std::string& s) {
+	std::string result = s;
+	for (size_t i = 0; i < result.length(); ++i) {
+		result[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(result[i])));
+	}
+	return result;
+}
 
 Request::Request() : _isComplete(false), _headersParsed(false), _bodyAuthorized(false), _maxBodySize(0), _errorCode(0) {}
 Request::Request(const std::string& rawRequest) : _rawRequest(rawRequest), _isComplete(false) {}
@@ -77,7 +90,7 @@ void Request::_parseHeaders(const std::string& headersBlock) {
 	while (std::getline(ss, line) && line != "\r") {
 		size_t colon = line.find(':');
 		if (colon != std::string::npos) {
-			std::string key = line.substr(0, colon);
+			std::string key = toLowerCopy(line.substr(0, colon));
 			std::string val = line.substr(colon + 1);
 			size_t start = val.find_first_not_of(" \t");
 			if (start != std::string::npos) val = val.substr(start);
@@ -153,7 +166,7 @@ std::string Request::getUri() const { return _uri; }
 std::string Request::getVersion() const { return _version; }
 std::string Request::getBody() const { return _body; }
 std::string Request::getHeader(const std::string& key) const {
-	std::map<std::string, std::string>::const_iterator it = _headers.find(key);
+	std::map<std::string, std::string>::const_iterator it = _headers.find(toLowerCopy(key));
 	return (it != _headers.end()) ? it->second : "";
 }
 std::map<std::string, std::string> Request::getHeaders() const {
