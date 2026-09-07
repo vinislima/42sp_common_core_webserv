@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include <cctype>
 #include <vector>
+#include <algorithm>
 
 Response::Response() : _statusCode(200), _cgiPid(-1), _cgiReadFd(-1), _cgiWriteFd(-1), _fileReadFd(-1), _fileWriteFd(-1) {
 	_initStatusMessages();
@@ -411,28 +412,40 @@ void Response::build(Request& req, const ServerConfig& config) {
 				if (autoindex) {
 					DIR* dir = opendir(filepath.c_str());
 					if (dir != NULL) {
-						std::string autoindexHtml = "<!DOCTYPE html><html><head><title>Index of " + req.getUri() + "</title></head>";
-						autoindexHtml += "<body style=\"font-family: monospace; background-color: #282a36; color: #f8f8f2; padding: 20px;\">";
-						autoindexHtml += "<h1 style=\"color: #50fa7b;\">Index of " + req.getUri() + "</h1><hr><ul>";
-						
+						// readdir() returns entries in filesystem/inode order (not
+						// alphabetical) and includes "." and "..". Only "." was being
+						// filtered — ".." was left in, so the listing offered a link
+						// to browse up out of the directory being listed. Collect
+						// names first, filter both, and sort before rendering.
+						std::vector<std::string> entries;
 						struct dirent* entry;
 						while ((entry = readdir(dir)) != NULL) {
 							std::string name = entry->d_name;
-							if (name == ".") continue;
-							
+							if (name == "." || name == "..") continue;
+							entries.push_back(name);
+						}
+						closedir(dir);
+						std::sort(entries.begin(), entries.end());
+
+						std::string autoindexHtml = "<!DOCTYPE html><html><head><title>Index of " + req.getUri() + "</title></head>";
+						autoindexHtml += "<body style=\"font-family: monospace; background-color: #282a36; color: #f8f8f2; padding: 20px;\">";
+						autoindexHtml += "<h1 style=\"color: #50fa7b;\">Index of " + req.getUri() + "</h1><hr><ul>";
+
+						for (size_t idx = 0; idx < entries.size(); ++idx) {
+							std::string name = entries[idx];
+
 							std::string link = req.getUri();
 							if (link[link.length() - 1] != '/') link += "/";
 							link += name;
-							
+
 							std::string fullPath = filepath + "/" + name;
 							struct stat item_stat;
 							if (stat(fullPath.c_str(), &item_stat) == 0 && S_ISDIR(item_stat.st_mode)) {
 								name += "/";
 							}
-							
+
 							autoindexHtml += "<li style=\"margin: 5px 0;\"><a style=\"color: #8be9fd; text-decoration: none; font-size: 1.2rem;\" href=\"" + link + "\">" + name + "</a></li>";
 						}
-						closedir(dir);
 						autoindexHtml += "</ul><hr><p style=\"color: #6272a4;\">Webserv / C++98</p></body></html>";
 						
 						setStatusCode(200);
