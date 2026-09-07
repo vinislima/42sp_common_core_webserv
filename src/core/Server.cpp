@@ -512,7 +512,11 @@ void Server::_runEventLoop() {
 
                 if (_pollFds[i].fd == client.cgiWriteFd) {
                     if (_pollFds[i].revents & (POLLOUT | POLLHUP)) {
-                        std::string body = client.req.getBody();
+                        // Reference, not a copy: getBody() used to copy the whole
+                        // body on every single POLLOUT event, turning a POST with
+                        // a large body into O(n^2) work (a full-body copy per
+                        // 4-8KB chunk written).
+                        const std::string& body = client.req.getBody();
                         size_t remaining = body.length() - client.cgiBytesWritten;
                         ssize_t sent = 0;
                         
@@ -652,7 +656,8 @@ void Server::_runEventLoop() {
 
                 // Writing to disk (POST Upload)
                 if (_pollFds[i].fd == client.fileWriteFd && (_pollFds[i].revents & POLLOUT)) {
-                    std::string body = client.req.getBody();
+                    // Reference, not a copy — same reasoning as the CGI write above.
+                    const std::string& body = client.req.getBody();
                     size_t remaining = body.length() - client.fileBytesWritten;
                     ssize_t bytesWritten = write(_pollFds[i].fd, body.c_str() + client.fileBytesWritten, remaining);
                     

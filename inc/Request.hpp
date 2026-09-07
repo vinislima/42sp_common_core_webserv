@@ -67,7 +67,7 @@ public:
 	std::string getMethod() const;
 	std::string getUri() const;
 	std::string getVersion() const;
-	std::string getBody() const;
+	const std::string& getBody() const; // by reference: callers that write it out in chunks (Server.cpp) must not copy the whole body on every poll() event
 	std::string getHeader(const std::string& key) const;
 	std::map<std::string, std::string> getHeaders() const;
 
