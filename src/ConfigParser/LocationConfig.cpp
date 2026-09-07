@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   LocationConfig.cpp                                 :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: yvieira- <yvieira-@student.42.fr>          +#+  +:+       +#+        */
+/*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/09/06 12:06:36 by yvieira-          #+#    #+#             */
-/*   Updated: 2026/09/06 12:06:37 by yvieira-         ###   ########.fr       */
+/*   Updated: 2026/09/07 16:19:34 by vinda-si         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -21,18 +21,18 @@ LocationConfig::LocationConfig(const LocationConfig& src) {
 }
 
 LocationConfig& LocationConfig::operator=(const LocationConfig& rhs) {
-    if (this != &rhs) {
-        this->_path = rhs._path;
-        this->_root = rhs._root;
-        this->_autoindex = rhs._autoindex;
-        this->_index = rhs._index;
-        this->_cgiExt = rhs._cgiExt;
-        this->_cgiPath = rhs._cgiPath;
+	if (this != &rhs) {
+		this->_path = rhs._path;
+		this->_root = rhs._root;
+		this->_autoindex = rhs._autoindex;
+		this->_index = rhs._index;
+		this->_cgiExt = rhs._cgiExt;
+		this->_cgiPath = rhs._cgiPath;
 		this->_redirectCode = rhs._redirectCode;
 		this->_redirectUrl = rhs._redirectUrl;
 		this->_clientMaxBodySize = rhs._clientMaxBodySize;
 		this->_hasClientMaxBodySize = rhs._hasClientMaxBodySize;
-	    this->_uploadStore = rhs._uploadStore;
+		this->_uploadStore = rhs._uploadStore;
 		this->_allowMethods = rhs._allowMethods;
 	}
 	return *this;
@@ -86,11 +86,11 @@ std::string LocationConfig::getUploadStore() const { return this->_uploadStore; 
 std::vector<std::string> LocationConfig::getAllowMethods() const { return this->_allowMethods; }
 
 bool LocationConfig::isMethodAllowed(const std::string& method) const {
-    // If the directive isn't defined in the .conf, allow everything by default
-    if (this->_allowMethods.empty()) return true; 
-    
-    for (size_t i = 0; i < this->_allowMethods.size(); ++i) {
-        if (this->_allowMethods[i] == method) return true;
-    }
-    return false;
+	// If the directive isn't defined in the .conf, allow everything by default
+	if (this->_allowMethods.empty()) return true; 
+
+	for (size_t i = 0; i < this->_allowMethods.size(); ++i) {
+		if (this->_allowMethods[i] == method) return true;
+	}
+	return false;
 }
