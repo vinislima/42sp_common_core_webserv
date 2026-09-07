@@ -41,6 +41,8 @@ private:
     std::string _getContentType(const std::string& path) const;
     const LocationConfig* _getBestMatchLocation(const std::string& uri, const ServerConfig& config) const;
     bool _normalizeUri(const std::string& uri, std::string& out) const;
+    bool _parseMultipart(const std::string& body, const std::string& boundary,
+                          std::string& outFilename, std::string& outContent) const;
     void _buildErrorPage(int code, const ServerConfig& config);
     void _handleCGI(const std::string& filepath, const std::string& cgiPath, const Request& req, const ServerConfig& config);
 
@@ -51,7 +53,7 @@ public:
     void setStatusCode(int code);
     void setHeader(const std::string& key, const std::string& value);
     void setBody(const std::string& body);
-    void build(const Request& req, const ServerConfig& config);
+    void build(Request& req, const ServerConfig& config);
     
     pid_t getCgiPid() const { return _cgiPid; }
     int getCgiReadFd() const { return _cgiReadFd; }
