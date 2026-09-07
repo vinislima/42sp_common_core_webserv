@@ -6,7 +6,7 @@
 /*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/09/06 12:06:41 by yvieira-          #+#    #+#             */
-/*   Updated: 2026/09/07 16:23:10 by vinda-si         ###   ########.fr       */
+/*   Updated: 2026/09/07 17:41:28 by vinda-si         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -58,7 +58,7 @@ void Server::_setupSockets() {
 			}
 		}
 		if (alreadyBound) {
-			std::cout << "[INFO] Socket para " << currentAddr << " ja est  aberto. Configurado como Virtual Host.\n";
+			std::cout << "[INFO] Socket para " << currentAddr << " ja está aberto. Configurado como Virtual Host.\n";
 			continue;
 		}
 
