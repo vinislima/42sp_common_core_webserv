@@ -16,6 +16,13 @@
 #include <signal.h>
 
 int main(int argc, char **argv) {
+	// Subject: "./webserv [configuration file]" — 0 or 1 arg is valid (no
+	// arg falls back to default.conf); anything else is a usage error, not
+	// something to silently ignore.
+	if (argc > 2) {
+		std::cerr << "Usage: " << argv[0] << " [configuration file]" << std::endl;
+		return 1;
+	}
 
 	signal(SIGPIPE, SIG_IGN);
 
