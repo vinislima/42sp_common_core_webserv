@@ -55,6 +55,7 @@ public:
 	void	parseBodyOnly();
 	bool	isComplete() const;
 	bool	areHeadersParsed() const { return _headersParsed; }
+	size_t	getRawLength() const { return _rawRequest.length(); } // for the header-size guard in Server::_parseClientRequest
 	bool	isBodyAuthorized() const { return _bodyAuthorized; }
 	size_t	getMaxBodySize() const { return _maxBodySize; }
 	int		getErrorCode() const { return _errorCode; }

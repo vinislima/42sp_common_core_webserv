@@ -43,6 +43,7 @@ void Response::_initStatusMessages() {
 	_statusMessages[404] = "Not Found";
 	_statusMessages[405] = "Method Not Allowed";
 	_statusMessages[413] = "Payload Too Large";
+	_statusMessages[431] = "Request Header Fields Too Large";
 	_statusMessages[500] = "Internal Server Error";
 	_statusMessages[501] = "Not Implemented";
 }
