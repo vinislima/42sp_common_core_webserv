@@ -221,7 +221,7 @@ void Request::_parseChunkedBody(const std::string& bodyBlock) {
 std::string Request::getMethod() const { return _method; }
 std::string Request::getUri() const { return _uri; }
 std::string Request::getVersion() const { return _version; }
-std::string Request::getBody() const { return _body; }
+const std::string& Request::getBody() const { return _body; }
 std::string Request::getHeader(const std::string& key) const {
 	std::map<std::string, std::string>::const_iterator it = _headers.find(toLowerCopy(key));
 	return (it != _headers.end()) ? it->second : "";
