@@ -104,16 +104,20 @@ void ConfigParser::_buildTree() {
 			if (i >= _tokens.size() || _tokens[i] != "{") {
 				throw std::runtime_error("Erro: Bloco server sem chave de abertura '{'");
 			}
-			i++; 
+			i++;
 			ServerConfig newServer;
-			
+			bool hasListen = false; // ServerConfig defaults to 0.0.0.0:80 when listen is never
+			                        // called; without this flag two "listen"-less server{} blocks
+			                        // would silently collide on that same default instead of erroring.
+
 			while (i < _tokens.size() && _tokens[i] != "}") {
 				if (_tokens[i] == ";") {
-					i++; 
+					i++;
 					continue;
 				}
 				else if (_tokens[i] == "listen") {
 					_parseListen(newServer, i);
+					hasListen = true;
 				}
 				else if (_tokens[i] == "server_name") {
 					_parseServerName(newServer, i);
@@ -151,6 +155,10 @@ void ConfigParser::_buildTree() {
 			
 			if (i == _tokens.size()) {
 				throw std::runtime_error("Erro: Bloco server sem chave de fechamento '}'");
+			}
+
+			if (!hasListen) {
+				throw std::runtime_error("Erro: Bloco server sem a diretiva 'listen' obrigatoria.");
 			}
 
 			_servers.push_back(newServer);
