@@ -144,6 +144,58 @@ bool Response::_normalizeUri(const std::string& uri, std::string& out) const {
 	return true;
 }
 
+// Faz o parse manual de um body multipart/form-data (RFC 7578): acha a
+// primeira parte que tem "filename=" no Content-Disposition (ou seja, é um
+// arquivo, não um campo de formulário comum), separa os headers daquela
+// parte do seu conteúdo binário e devolve os dois. Sem isso, o boundary e
+// os headers de cada parte iam junto pro arquivo salvo em disco.
+bool Response::_parseMultipart(const std::string& body, const std::string& boundary,
+								std::string& outFilename, std::string& outContent) const {
+	std::string delimiter = "--" + boundary;
+	size_t pos = body.find(delimiter);
+	if (pos == std::string::npos) return false;
+
+	while (pos != std::string::npos) {
+		pos += delimiter.length();
+
+		// "--" logo após o boundary marca o fim do multipart (delimiter final).
+		if (body.compare(pos, 2, "--") == 0) break;
+
+		if (body.compare(pos, 2, "\r\n") == 0) pos += 2;
+
+		size_t nextDelim = body.find(delimiter, pos);
+		std::string part = (nextDelim == std::string::npos) ? body.substr(pos) : body.substr(pos, nextDelim - pos);
+
+		size_t headerEnd = part.find("\r\n\r\n");
+		if (headerEnd != std::string::npos) {
+			std::string partHeaders = part.substr(0, headerEnd);
+			std::string content = part.substr(headerEnd + 4);
+
+			// remove o "\r\n" final que antecede o próximo boundary
+			if (content.length() >= 2 && content.compare(content.length() - 2, 2, "\r\n") == 0) {
+				content = content.substr(0, content.length() - 2);
+			}
+
+			size_t cdPos = partHeaders.find("Content-Disposition:");
+			if (cdPos != std::string::npos) {
+				size_t namePos = partHeaders.find("filename=\"", cdPos);
+				if (namePos != std::string::npos) {
+					namePos += 10;
+					size_t endPos = partHeaders.find("\"", namePos);
+					if (endPos != std::string::npos) {
+						outFilename = partHeaders.substr(namePos, endPos - namePos);
+						outContent = content;
+						return true;
+					}
+				}
+			}
+		}
+
+		pos = nextDelim;
+	}
+	return false;
+}
+
 std::string Response::_getFallbackHTML(int code) const {
 	std::ostringstream oss;
 	std::string msg = "Unknown Error";
@@ -202,7 +254,7 @@ void Response::_buildErrorPage(int code, const ServerConfig& config) {
 	}
 }
 
-void Response::build(const Request& req, const ServerConfig& config) {
+void Response::build(Request& req, const ServerConfig& config) {
 	_headers.clear();
 	_body.clear();
 	_rawResponse.clear();
@@ -373,21 +425,53 @@ void Response::build(const Request& req, const ServerConfig& config) {
 		}
 
 		std::string filename = "";
-		std::string contentDisposition = req.getHeader("Content-Disposition");
-		if (!contentDisposition.empty()) {
-			size_t namePos = contentDisposition.find("filename=\"");
-			if (namePos != std::string::npos) {
-				namePos += 10;
-				size_t endPos = contentDisposition.find("\"", namePos);
-				if (endPos != std::string::npos) {
-					filename = contentDisposition.substr(namePos, endPos - namePos);
+		std::string uploadContent = req.getBody();
+
+		std::string contentType = req.getHeader("Content-Type");
+		size_t boundaryPos = contentType.find("boundary=");
+
+		if (contentType.find("multipart/form-data") != std::string::npos && boundaryPos != std::string::npos) {
+			// Content-Disposition de um upload real (via <form> de navegador,
+			// ou curl -F) vive DENTRO do body, por parte do multipart — nunca
+			// como header HTTP top-level. Fazemos o parse manual do boundary
+			// pra extrair só o conteúdo binário da parte que é o arquivo.
+			std::string boundary = contentType.substr(boundaryPos + 9);
+			if (!boundary.empty() && boundary[0] == '"') {
+				boundary = boundary.substr(1);
+				size_t closingQuote = boundary.find('"');
+				if (closingQuote != std::string::npos) boundary = boundary.substr(0, closingQuote);
+			} else {
+				size_t semiPos = boundary.find(';');
+				if (semiPos != std::string::npos) boundary = boundary.substr(0, semiPos);
+			}
+
+			std::string extractedContent;
+			if (_parseMultipart(req.getBody(), boundary, filename, extractedContent)) {
+				uploadContent = extractedContent;
+			} else {
+				std::cout << "[ERRO] multipart/form-data mal formado ou sem parte de arquivo.\n";
+				_buildErrorPage(400, config);
+				return;
+			}
+		} else {
+			// Upload raw (sem multipart), ex: curl -X POST --data-binary @arquivo
+			// com um Content-Disposition mandado manualmente como header top-level.
+			std::string contentDisposition = req.getHeader("Content-Disposition");
+			if (!contentDisposition.empty()) {
+				size_t namePos = contentDisposition.find("filename=\"");
+				if (namePos != std::string::npos) {
+					namePos += 10;
+					size_t endPos = contentDisposition.find("\"", namePos);
+					if (endPos != std::string::npos) {
+						filename = contentDisposition.substr(namePos, endPos - namePos);
+					}
 				}
 			}
 		}
-		// O filename vem do cliente (header Content-Disposition) — nunca pode
-		// conter separador de diretório, senão o upload também vira um Path
-		// Traversal (ex: filename="../../etc/cron.d/x"). Mantém só o último
-		// componente do path.
+
+		// O filename vem do cliente — nunca pode conter separador de
+		// diretório, senão o upload também vira um Path Traversal (ex:
+		// filename="../../etc/cron.d/x"). Mantém só o último componente.
 		size_t lastSlash = filename.find_last_of('/');
 		if (lastSlash != std::string::npos) {
 			filename = filename.substr(lastSlash + 1);
@@ -398,6 +482,10 @@ void Response::build(const Request& req, const ServerConfig& config) {
 			oss << "upload_" << time(NULL) << ".bin";
 			filename = oss.str();
 		}
+
+		// Server.cpp escreve em disco a partir de req.getBody() — precisa ser
+		// atualizado com o conteúdo já sem o envelope do multipart.
+		req.setBody(uploadContent);
 
 		std::string fullUploadPath = uploadStore + "/" + filename;
 

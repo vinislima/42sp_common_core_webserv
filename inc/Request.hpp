@@ -46,6 +46,7 @@ public:
 	~Request();
 
 	void	appendToRaw(const std::string& data);
+	void	setBody(const std::string& body) { _body = body; }
 	void	setBodyAuthorized(bool auth) { _bodyAuthorized = auth; }
 	void	setMaxBodySize(size_t size) { _maxBodySize = size; }
 	void	parseHeadersOnly();
