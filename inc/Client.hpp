@@ -33,7 +33,7 @@ public:
     size_t cgiBytesWritten;
     time_t cgiStart;
 
-    // Variáveis de I/O de Arquivo Assíncrono
+    // Asynchronous file I/O variables
     bool isFile;
     int fileReadFd;
     int fileWriteFd;

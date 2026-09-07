@@ -166,8 +166,8 @@ const ServerConfig* Server::_matchConfig(int clientFd, const std::string& hostHe
         }
     }
 
-    // Nenhum server_name bateu: cai no primeiro server{} que escuta nessa porta
-    // (comportamento padrão de "default server" por porta, igual ao nginx).
+    // No server_name matched: fall back to the first server{} listening on
+    // that port (default "default server" per-port behavior, same as nginx).
     return firstOnPort ? firstOnPort : defaultConfig;
 }
 
@@ -187,11 +187,11 @@ bool Server::_handleClientRead(int clientFd) {
     return true;
 }
 
-// Extraído de _handleClientRead pra ser reaproveitado no reset de Keep-Alive:
-// quando uma 2ª requisição já chegou pipelined (junto com a 1ª, no mesmo
-// recv()), os bytes dela já estão no buffer sem que um novo recv() aconteça
-// — então esse parsing precisa poder ser chamado de novo sem depender de
-// outro evento de leitura no socket.
+// Extracted from _handleClientRead so it can be reused by the Keep-Alive
+// reset: when a 2nd request already arrived pipelined (together with the
+// 1st, in the same recv()), its bytes are already in the buffer without a
+// new recv() happening — so this parsing needs to be callable again
+// without depending on another read event on the socket.
 void Server::_parseClientRequest(int clientFd) {
     Client& client = _clients[clientFd];
 
@@ -255,7 +255,7 @@ bool Server::_handleClientWrite(int clientFd) {
                 res.build(client.req, *matchedConfig);
                 
                 // ==============================================================
-                // INTERCEPTADOR DE CGI
+                // CGI INTERCEPTOR
                 // ==============================================================
                 if (res.getCgiPid() != -1) {
                     client.isCgi = true;
@@ -294,7 +294,7 @@ bool Server::_handleClientWrite(int clientFd) {
                     return true;
                 }
                 // ==============================================================
-                // INTERCEPTADOR DE ARQUIVOS (I/O ASSÍNCRONO NO DISCO)
+                // FILE INTERCEPTOR (ASYNCHRONOUS DISK I/O)
                 // ==============================================================
                 else if (res.getFileReadFd() != -1 || res.getFileWriteFd() != -1) {
                     client.isFile = true;
@@ -302,7 +302,7 @@ bool Server::_handleClientWrite(int clientFd) {
                     client.fileWriteFd = res.getFileWriteFd();
                     client.fileBytesWritten = 0;
                     
-                    // Coloca os Headers no buffer, o body do arquivo virá via poll()
+                    // Puts the headers in the buffer, the file body will arrive via poll()
                     client.responseBuffer = res.getRawResponse(); 
 
                     if (client.fileReadFd != -1) {
@@ -331,7 +331,7 @@ bool Server::_handleClientWrite(int clientFd) {
                     return true;
                 }
                 // ==============================================================
-                // FLUXO NORMAL (Páginas em memória, Erros, Redirecionamento)
+                // NORMAL FLOW (In-memory pages, Errors, Redirects)
                 // ==============================================================
                 else {
                     client.responseBuffer = res.getRawResponse();
@@ -358,13 +358,13 @@ bool Server::_handleClientWrite(int clientFd) {
                     std::cout << "[HTTP] Resposta completa enviada com sucesso ao FD " << clientFd << "\n";
 
                     if (!client.req.wantsKeepAlive()) {
-                        return false; // HTTP/1.0 default, Connection: close explícito, ou erro grave de parsing
+                        return false; // HTTP/1.0 default, explicit Connection: close, or grave parsing error
                     }
 
-                    // Keep-Alive: reseta o estado do Client pra aceitar uma nova
-                    // requisição na MESMA conexão TCP, preservando qualquer byte
-                    // que já tenha chegado pipelined (2ª requisição mandada pelo
-                    // cliente sem esperar a resposta da 1ª).
+                    // Keep-Alive: reset the Client's state to accept a new
+                    // request on the SAME TCP connection, preserving any byte
+                    // that already arrived pipelined (2nd request sent by the
+                    // client without waiting for the 1st response).
                     std::string leftover = client.req.extractLeftoverRaw();
                     client = Client();
                     client.updateActivity();
@@ -398,7 +398,7 @@ void Server::_checkTimeouts() {
         size_t idx = i - 1;
         int fd = _pollFds[idx].fd;
 
-        // Limpando Timeout para não derrubar File I/O ou CGI em execução
+        // Skip timeout so we don't drop File I/O or a running CGI
         if (_isListenSocket(fd) || _cgiToClient.find(fd) != _cgiToClient.end() || _fileToClient.find(fd) != _fileToClient.end()) {
             continue; 
         }
@@ -413,10 +413,10 @@ void Server::_checkTimeouts() {
     }
 }
 
-// CGI travado (ex: script em loop infinito) não pode ficar preso para sempre:
-// diferente do timeout de ociosidade acima, aqui o cliente está "ativo" (esperando
-// o CGI responder), então precisa de um limite proprio baseado em quanto tempo o
-// processo filho já está rodando.
+// A stuck CGI (e.g. a script in an infinite loop) can't be left hanging
+// forever: unlike the idle timeout above, here the client is "active"
+// (waiting for the CGI to respond), so it needs its own limit based on how
+// long the child process has been running.
 void Server::_checkCgiTimeouts() {
     time_t now = time(NULL);
     const double CGI_TIMEOUT_SECONDS = 10.0;
@@ -472,7 +472,7 @@ void Server::_runEventLoop() {
             if (_pollFds[i].revents == 0) continue;
 
             // =================================================================
-            // 1. TRATAMENTO DOS TUBOS DO CGI (Processamento Assíncrono)
+            // 1. HANDLING CGI PIPES (Asynchronous Processing)
             // =================================================================
             if (_cgiToClient.find(_pollFds[i].fd) != _cgiToClient.end()) {
                 int clientFd = _cgiToClient[_pollFds[i].fd];
@@ -530,11 +530,11 @@ void Server::_runEventLoop() {
                         }
 
                         if (bytesRead <= 0 || (_pollFds[i].revents & POLLHUP)) {
-                            // Bloqueante de propósito: o pipe só dá EOF quando o processo
-                            // filho fecha o stdout, o que acontece na saída dele — logo o
-                            // wait aqui retorna quase instantaneamente. Usar WNOHANG neste
-                            // ponto arriscaria ler status=0 (processo ainda não reapeado)
-                            // e interpretar isso como "saiu com sucesso" por engano.
+                            // Blocking on purpose: the pipe only gives EOF once the child
+                            // process closes stdout, which happens when it exits — so the
+                            // wait here returns almost instantly. Using WNOHANG at this
+                            // point would risk reading status=0 (process not yet reaped)
+                            // and mistaking that for "exited successfully".
                             int status = 0;
                             waitpid(client.cgiPid, &status, 0);
                             close(_pollFds[i].fd);
@@ -589,7 +589,7 @@ void Server::_runEventLoop() {
             }
             
             // =================================================================
-            // 2. TRATAMENTO DOS ARQUIVOS DE DISCO (I/O Assíncrono)
+            // 2. HANDLING DISK FILES (Asynchronous I/O)
             // =================================================================
             if (_fileToClient.find(_pollFds[i].fd) != _fileToClient.end()) {
                 int clientFd = _fileToClient[_pollFds[i].fd];
@@ -611,16 +611,16 @@ void Server::_runEventLoop() {
                     continue;
                 }
 
-                // Lendo do disco (GET ou Error Pages)
+                // Reading from disk (GET or Error Pages)
                 if (_pollFds[i].fd == client.fileReadFd && (_pollFds[i].revents & POLLIN)) {
-                    char buffer[8192]; // Lê em chunks
+                    char buffer[8192]; // Reads in chunks
                     ssize_t bytesRead = read(_pollFds[i].fd, buffer, sizeof(buffer));
                     
                     if (bytesRead > 0) {
                         client.responseBuffer.append(buffer, bytesRead);
                     }
                     
-                    if (bytesRead <= 0) { // EOF (Leitura concluída)
+                    if (bytesRead <= 0) { // EOF (Read complete)
                         close(_pollFds[i].fd);
                         _fileToClient.erase(_pollFds[i].fd);
                         _pollFds.erase(_pollFds.begin() + i);
@@ -637,7 +637,7 @@ void Server::_runEventLoop() {
                     continue;
                 }
 
-                // Escrevendo no disco (POST Upload)
+                // Writing to disk (POST Upload)
                 if (_pollFds[i].fd == client.fileWriteFd && (_pollFds[i].revents & POLLOUT)) {
                     std::string body = client.req.getBody();
                     size_t remaining = body.length() - client.fileBytesWritten;
@@ -653,7 +653,7 @@ void Server::_runEventLoop() {
                         _pollFds.erase(_pollFds.begin() + i);
                         client.fileWriteFd = -1;
                         client.isFile = false;
-                        client.isReadyToSend = true; // O Header de Sucesso 201 já foi colocado lá pelo _handleClientWrite
+                        client.isReadyToSend = true; // The 201 success header was already placed there by _handleClientWrite
                         client.bytesSent = 0;
                         
                         for (size_t k = 0; k < _pollFds.size(); ++k) {
@@ -666,7 +666,7 @@ void Server::_runEventLoop() {
             }
 
             // =================================================================
-            // 3. TRATAMENTO NORMAL DOS CLIENTES E REDE
+            // 3. NORMAL CLIENT AND NETWORK HANDLING
             // =================================================================
             if (_pollFds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
                 std::cout << "[REDE] Erro/HUP no cliente. FD: " << _pollFds[i].fd << "\n";

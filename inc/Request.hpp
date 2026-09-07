@@ -33,8 +33,8 @@ private:
 	bool	_bodyAuthorized;
 	size_t	_maxBodySize;
 	int		_errorCode;
-	size_t	_consumedBytes;    // bytes de _rawRequest usados por ESSA requisição (pra Keep-Alive/pipelining)
-	size_t	_bodyBytesConsumed; // idem, mas só a parte do corpo (preenchido por _parseBody/_parseChunkedBody)
+	size_t	_consumedBytes;    // bytes of _rawRequest used by THIS request (for Keep-Alive/pipelining)
+	size_t	_bodyBytesConsumed; // same, but just the body part (filled in by _parseBody/_parseChunkedBody)
 	void _parseRequestLine(const std::string& line);
 	void _parseHeaders(const std::string& headersBlock);
 	void _parseBody(const std::string& bodyBlock);
@@ -70,9 +70,9 @@ public:
 	std::string getHeader(const std::string& key) const;
 	std::map<std::string, std::string> getHeaders() const;
 
-	// Keep-Alive / pipelining: bytes de _rawRequest que sobraram depois dessa
-	// requisição (já pertencem à próxima, se o cliente já os mandou) e se essa
-	// conexão deve continuar aberta pra receber a próxima requisição.
+	// Keep-Alive / pipelining: bytes of _rawRequest left over after this
+	// request (already belong to the next one, if the client already sent
+	// them) and whether this connection should stay open for the next request.
 	std::string extractLeftoverRaw() const;
 	bool wantsKeepAlive() const;
 };

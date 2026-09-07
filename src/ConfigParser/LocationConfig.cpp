@@ -12,9 +12,9 @@
 
 #include "../../inc/LocationConfig.hpp"
 
-LocationConfig::LocationConfig() : _path(""), _root(""), _autoindex(false), _redirectCode(0), _redirectUrl(""), _uploadStore("") {}
+LocationConfig::LocationConfig() : _path(""), _root(""), _autoindex(AUTOINDEX_INHERIT), _redirectCode(0), _redirectUrl(""), _uploadStore("") {}
 
-LocationConfig::LocationConfig(const std::string& path) : _path(path), _root(""), _autoindex(false), _redirectCode(0), _redirectUrl(""), _uploadStore("") {}
+LocationConfig::LocationConfig(const std::string& path) : _path(path), _root(""), _autoindex(AUTOINDEX_INHERIT), _redirectCode(0), _redirectUrl(""), _uploadStore("") {}
 
 LocationConfig::LocationConfig(const LocationConfig& src) {
 	*this = src;
@@ -40,7 +40,7 @@ LocationConfig::~LocationConfig() {}
 
 void LocationConfig::setPath(const std::string& path) { this->_path = path; }
 void LocationConfig::setRoot(const std::string& root) { this->_root = root; }
-void LocationConfig::setAutoindex(bool autoindex) { this->_autoindex = autoindex; }
+void LocationConfig::setAutoindex(bool autoindex) { this->_autoindex = autoindex ? AUTOINDEX_ON : AUTOINDEX_OFF; }
 void LocationConfig::addIndex(const std::string& index) { this->_index.push_back(index); }
 
 void LocationConfig::setRedirect(int code, const std::string& url) {
@@ -65,7 +65,7 @@ std::string LocationConfig::getRedirectUrl() const {
 
 std::string LocationConfig::getPath() const { return this->_path; }
 std::string LocationConfig::getRoot() const { return this->_root; }
-bool LocationConfig::getAutoindex() const { return this->_autoindex; }
+LocationConfig::AutoindexState LocationConfig::getAutoindexState() const { return this->_autoindex; }
 std::vector<std::string> LocationConfig::getIndex() const { return this->_index; }
 
 void LocationConfig::setCgiExt(const std::string& ext) { this->_cgiExt = ext; }
@@ -77,7 +77,7 @@ std::string LocationConfig::getUploadStore() const { return this->_uploadStore; 
 std::vector<std::string> LocationConfig::getAllowMethods() const { return this->_allowMethods; }
 
 bool LocationConfig::isMethodAllowed(const std::string& method) const {
-    // Se a diretiva não foi definida no .conf, permitimos tudo por padrão
+    // If the directive isn't defined in the .conf, allow everything by default
     if (this->_allowMethods.empty()) return true; 
     
     for (size_t i = 0; i < this->_allowMethods.size(); ++i) {
