@@ -28,14 +28,16 @@ Se `make re` falhar, ou `make` sozinho religar algo sem motivo → **flag
 
 ## 1. README e Verificação de Conformidade
 
-Abra `README.md` e confira, item a item:
+Abra `README.md` e confira, item a item. **O subject exige o README em
+inglês** (aviso em destaque no `subject.pdf`) — o texto abaixo já é a versão
+em inglês exigida, não uma tradução da régua:
 
 - [ ] 1ª linha em itálico, exatamente:
-  `_Este projeto foi criado como parte do currículo da 42 por <login1>[, <login2>...]._`
-  → Neste repo: `_Este projeto foi criado como parte do currículo da 42 por yvieira-, elvictor e vinda-si._`
-- [ ] Seção **"Descrição"** explicando o propósito/visão geral.
-- [ ] Seção **"Instruções"** (compilação/instalação/execução).
-- [ ] Seção **"Recursos"** com referências e explicação de uso de IA (para
+  `_This project has been created as part of the 42 curriculum by <login1>[, <login2>...]._`
+  → Neste repo: `_This project has been created as part of the 42 curriculum by yvieira-, elvictor, vinda-si._`
+- [ ] Seção **"Description"** explicando o propósito/visão geral.
+- [ ] Seção **"Instructions"** (compilação/instalação/execução).
+- [ ] Seção **"Resources"** com referências e explicação de uso de IA (para
   quais tarefas/partes do projeto foi usada).
 
 Se **qualquer** um destes faltar → nota 0 imediata. Confirme os quatro antes
@@ -122,7 +124,9 @@ $ ./webserv default.conf
 Antes de mais nada, tenha a [lista oficial de status codes](https://developer.mozilla.org/pt-BR/docs/Web/HTTP/Status) aberta e
 confira, em **todos** os testes abaixo, que o código retornado é o correto
 para a situação. Códigos suportados neste servidor: `200, 201, 204, 301, 302,
-303, 307, 308, 400, 403, 404, 405, 413, 500, 501`.
+303, 307, 308, 400, 403, 404, 405, 413, 431, 500, 501, 504` (o `504` é
+devolvido só no timeout de CGI, seção 5.5; o `431` no request-line/headers
+maiores que 8192 bytes).
 
 ### 3.2 Vários sites em interfaces/portas diferentes
 ```bash
@@ -288,10 +292,12 @@ $2 curl -i -H "Host: local.com" http://localhost:8080/                       # e
 Esperado: o servidor segue respondendo outras requisições normalmente
 (não bloqueia por causa de um CGI travado), e depois de **10 segundos** o
 processo do CGI travado recebe `SIGKILL` (timeout implementado em
-`Server::_checkCgiTimeouts`), a 1ª requisição em background recebe `500` e
-não fica pendurada para sempre. Confirme observando o log `[TIMEOUT] CGI
-(PID ...) excedeu 10s...` no terminal do servidor, e que não sobra processo
-zumbi (`ps aux | grep loop.py` depois de ~15s não deve mostrar nada).
+`Server::_checkCgiTimeouts`), a 1ª requisição em background recebe
+`504 Gateway Timeout` (não `500` — é um timeout do "gateway" CGI, não um
+erro interno do servidor) e não fica pendurada para sempre. Confirme
+observando o log `[TIMEOUT] CGI (PID ...) excedeu 10s...` no terminal do
+servidor, e que não sobra processo zumbi (`ps aux | grep loop.py` depois de
+~15s não deve mostrar nada).
 
 ---
 
