@@ -271,8 +271,9 @@ void Response::_buildErrorPage(int code, const ServerConfig& config) {
 		int fd = open(filepath.c_str(), O_RDONLY);
 		if (fd >= 0) {
 			fcntl(fd, F_SETFL, O_NONBLOCK);
+			fcntl(fd, F_SETFD, FD_CLOEXEC); // don't leak this fd into a future CGI child's fork()+execve()
 			this->_fileReadFd = fd;
-			
+
 			struct stat path_stat;
 			stat(filepath.c_str(), &path_stat);
 			
@@ -453,8 +454,9 @@ void Response::build(Request& req, const ServerConfig& config) {
 		int fd = open(filepath.c_str(), O_RDONLY);
 		if (fd >= 0) {
 			fcntl(fd, F_SETFL, O_NONBLOCK);
+			fcntl(fd, F_SETFD, FD_CLOEXEC); // don't leak this fd into a future CGI child's fork()+execve()
 			this->_fileReadFd = fd;
-			
+
 			struct stat file_stat;
 			stat(filepath.c_str(), &file_stat);
 			
@@ -554,8 +556,9 @@ void Response::build(Request& req, const ServerConfig& config) {
 		int fd = open(fullUploadPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 		if (fd >= 0) {
 			fcntl(fd, F_SETFL, O_NONBLOCK);
+			fcntl(fd, F_SETFD, FD_CLOEXEC); // don't leak this fd into a future CGI child's fork()+execve()
 			this->_fileWriteFd = fd;
-			
+
 			std::string locationHeader = req.getUri();
 			if (locationHeader[locationHeader.length() - 1] != '/') {
 				locationHeader += "/";
@@ -715,7 +718,14 @@ void Response::_handleCGI(const std::string& filepath, const std::string& cgiPat
 		close(pipeOut[1]);
 		fcntl(pipeIn[1], F_SETFL, O_NONBLOCK);
 		fcntl(pipeOut[0], F_SETFL, O_NONBLOCK);
-		
+		// Don't leak these into a DIFFERENT CGI's fork()+execve() while this
+		// one is still running (concurrent clients each with their own CGI).
+		// dup2() in the child always clears FD_CLOEXEC on the resulting fd
+		// regardless of the source, so this has no effect on this CGI's own
+		// STDIN/STDOUT — only on fds inherited by an unrelated future child.
+		fcntl(pipeIn[1], F_SETFD, FD_CLOEXEC);
+		fcntl(pipeOut[0], F_SETFD, FD_CLOEXEC);
+
 		this->_cgiPid = pid;
 		this->_cgiWriteFd = pipeIn[1];
 		this->_cgiReadFd = pipeOut[0];
