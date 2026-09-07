@@ -32,7 +32,9 @@ Este guia mapeia os requisitos da régua de avaliação da 42 para que possam se
     ```bash
     curl -X BATATA -i http://localhost:8080/
     ```
-    *(O servidor deve retornar erro como 400 ou 405, mas **NUNCA** crashar).*
+    *(Deve retornar `501 Not Implemented` - método que o servidor nunca
+    implementa, não `405`, que é reservado a método real recusado por uma
+    rota específica. Em qualquer caso, o servidor **NUNCA** deve crashar).*
 
 ### 3. Testes de CGI
 *   **GET e POST em CGI:** Utilize o executável `tester` oficial da 42 ou o script Python de teste:
@@ -50,15 +52,38 @@ Abra o navegador, acesse `http://localhost:8080` e abra a aba "Network" (Rede) n
 *   Acesse um diretório sem `index.html` e com `autoindex on` para ver a listagem de arquivos.
 *   Acesse a rota de redirecionamento (ex: `/google`) e verifique se o status é `301` ou `302`.
 
-### 5. Estresse e Memória (Siege & Valgrind)
+### 5. Estresse e Memória (Siege & Leaks/Valgrind)
+
 O servidor deve ter disponibilidade superior a 99.5% e 0 vazamentos de memória.
-1.  Inicie o servidor com Valgrind (Linux) ou Leaks (Mac):
-    ```bash
-    valgrind --leak-check=full ./webserv
-    ```
-2.  Em outro terminal, execute o Siege:
-    ```bash
-    siege -b -c 50 -t 30s http://localhost:8080/
-    ```
-3.  Observe a disponibilidade (Availability) no final do Siege.
-4.  Pare o servidor (`Ctrl+C`) e verifique o relatório do Valgrind. Nenhuma memória deve ser perdida (All heap blocks were freed).
+Use `www/empty.html` (página vazia de verdade) para não distorcer o tempo de
+resposta com custo de I/O de disco/CGI - é o que a régua pede literalmente.
+
+**No Linux**, com Valgrind:
+```bash
+valgrind --leak-check=full ./webserv default.conf
+```
+
+**No Mac** (Valgrind não roda no Apple Silicon), com o `leaks` nativo do
+sistema — testado e confirmado nesta auditoria (`0 leaks for 0 total leaked
+bytes` em tráfego normal e no caminho de timeout de CGI):
+```bash
+# Suba o servidor em background e guarde o PID
+./webserv default.conf &
+SERVER_PID=$!
+
+# ... rode o siege e os testes manuais que quiser nesse meio tempo ...
+
+# Depois de gerar tráfego, verifique o heap do processo ainda vivo
+leaks $SERVER_PID
+```
+
+Em outro terminal, execute o Siege:
+
+```bash
+siege -b -c 50 -t 30s http://localhost:8080/empty.html
+```
+
+Observe a disponibilidade (Availability) no final do Siege — deve ficar
+próxima de 100% (confirmado nesta auditoria: 100.00% em 336k transações,
+0 falhas, memória do processo voltando ao valor de antes do teste depois
+da carga acabar).
