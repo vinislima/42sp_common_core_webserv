@@ -267,6 +267,17 @@ void Response::build(Request& req, const ServerConfig& config) {
 
 	setStatusCode(200);
 
+	// 501 vs 405: a method this server never implements at all (PATCH, PUT,
+	// TRACE, ...) is 501 Not Implemented regardless of location/allow_methods
+	// — even a location with no allow_methods restriction (which lets any
+	// method through the isMethodAllowed() check below) can't actually serve
+	// it, since there is no code path for it past this point. 405 is reserved
+	// for a method this server DOES implement but that specific route forbids.
+	if (req.getMethod() != "GET" && req.getMethod() != "POST" && req.getMethod() != "DELETE") {
+		_buildErrorPage(501, config);
+		return;
+	}
+
 	std::string cleanUri = req.getUri();
 	size_t queryPos = cleanUri.find('?');
 	if (queryPos != std::string::npos) {
@@ -545,7 +556,10 @@ void Response::build(Request& req, const ServerConfig& config) {
 		}
 		_generateRawResponse();
 	} else {
-		_buildErrorPage(405, config);
+		// Unreachable: the check at the top of build() already sends any
+		// method other than GET/POST/DELETE to 501. Kept as a defensive
+		// fallback with the semantically correct code, not 405.
+		_buildErrorPage(501, config);
 		return;
 	}
 }
