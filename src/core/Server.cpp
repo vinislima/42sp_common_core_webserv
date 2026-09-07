@@ -222,6 +222,22 @@ void Server::_parseClientRequest(int clientFd) {
                 const ServerConfig* matchedConfig = _matchConfig(clientFd, hostHeader);
 
                 size_t maxBodySize = matchedConfig->getClientMaxBodySize();
+
+                // A location can override client_max_body_size for its own
+                // route. The body hasn't arrived yet at this point, but the
+                // URI (and query string) already have — strip the query
+                // string the same way Response::build() does before
+                // matching, so both agree on which location applies.
+                std::string uriForMatch = client.req.getUri();
+                size_t queryPos = uriForMatch.find('?');
+                if (queryPos != std::string::npos) {
+                    uriForMatch = uriForMatch.substr(0, queryPos);
+                }
+                const LocationConfig* loc = matchedConfig->getBestMatchLocation(uriForMatch);
+                if (loc && loc->hasClientMaxBodySize()) {
+                    maxBodySize = loc->getClientMaxBodySize();
+                }
+
                 client.req.setMaxBodySize(maxBodySize);
 
                 std::string cl = client.req.getHeader("Content-Length");

@@ -132,23 +132,6 @@ void Response::_generateRawResponse() {
 	_rawResponse = ss.str();
 }
 
-const LocationConfig* Response::_getBestMatchLocation(const std::string& uri, const ServerConfig& config) const {
-	const LocationConfig* bestMatch = NULL;
-	size_t longestMatchLength = 0;
-		
-	const std::vector<LocationConfig>& location = config.getLocations();
-	for (std::vector<LocationConfig>::const_iterator it = location.begin(); it != location.end(); ++it) {
-		std::string locPath = it->getPath();
-		if (uri.find(locPath) == 0) {
-			if (locPath.length() > longestMatchLength) {
-				longestMatchLength = locPath.length();
-				bestMatch = &(*it);
-			}
-		}
-	}
-	return bestMatch;
-}
-
 // Collapses "." and ".." from an HTTP URI (always absolute, starts with
 // "/"), rejecting any ".." that tries to go above the root — e.g.
 // "/../../../../etc/passwd" or "/files/../../etc/passwd" become invalid
@@ -334,7 +317,7 @@ void Response::build(Request& req, const ServerConfig& config) {
 	}
 	cleanUri = normalizedUri;
 
-	const LocationConfig* loc = _getBestMatchLocation(cleanUri, config);
+	const LocationConfig* loc = config.getBestMatchLocation(cleanUri);
 
 	if (loc && !loc->isMethodAllowed(req.getMethod())) {
 		_buildErrorPage(405, config);

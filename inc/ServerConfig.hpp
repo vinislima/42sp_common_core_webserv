@@ -60,6 +60,12 @@ public:
 	bool						getAutoindex() const;
 	std::vector<std::string>	getIndex() const;
 	const std::vector<LocationConfig>& getLocations() const;
+
+	// Longest-prefix match, same as nginx. Moved here (from Response, where
+	// it originally lived) so Server.cpp can also resolve the location for a
+	// URI — needed to apply a per-location client_max_body_size before the
+	// body even starts arriving, not just once Response::build() runs.
+	const LocationConfig* getBestMatchLocation(const std::string& uri) const;
 };
 
 #endif

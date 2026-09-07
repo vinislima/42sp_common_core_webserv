@@ -126,7 +126,9 @@ void ConfigParser::_buildTree() {
 					_parseErrorPage(newServer, i);
 				}
 				else if (_tokens[i] == "client_max_body_size") {
-					_parseClientMaxBodySize(newServer, i);
+					size_t sizeVal;
+					_parseClientMaxBodySize(sizeVal, i);
+					newServer.setClientMaxBodySize(sizeVal);
 				}
 				else if (_tokens[i] == "root") {
 					std::string rootVal;
@@ -240,7 +242,7 @@ void ConfigParser::_parseErrorPage(ServerConfig& server, size_t& i) {
 	}
 }
 
-void ConfigParser::_parseClientMaxBodySize(ServerConfig& server, size_t& i) {
+void ConfigParser::_parseClientMaxBodySize(size_t& outSize, size_t& i) {
 	i++; 
 	if (i >= _tokens.size() || _tokens[i] == ";") {
 		 throw std::runtime_error("Erro: Diretiva client_max_body_size vazia");
@@ -270,8 +272,8 @@ void ConfigParser::_parseClientMaxBodySize(ServerConfig& server, size_t& i) {
 	std::stringstream ss(val);
 	size_t size;
 	ss >> size;
-	server.setClientMaxBodySize(size * multiplier);
-		
+	outSize = size * multiplier;
+
 	i++;
 	if (i >= _tokens.size() || _tokens[i] != ";") {
 		 throw std::runtime_error("Erro: Diretiva client_max_body_size sem ponto e vírgula ';'");
@@ -368,6 +370,11 @@ void ConfigParser::_parseLocation(ServerConfig& server, size_t& i) {
             for (size_t j = 0; j < indexList.size(); ++j) {
                 newLocation.addIndex(indexList[j]);
             }
+        }
+        else if (_tokens[i] == "client_max_body_size") {
+            size_t sizeVal;
+            _parseClientMaxBodySize(sizeVal, i);
+            newLocation.setClientMaxBodySize(sizeVal);
         }
         else if (_tokens[i] == "return") {
             _parseReturn(newLocation, i);
