@@ -21,6 +21,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <cctype>
+#include <vector>
 
 Response::Response() : _statusCode(200), _cgiPid(-1), _cgiReadFd(-1), _cgiWriteFd(-1), _fileReadFd(-1), _fileWriteFd(-1) {
 	_initStatusMessages();
@@ -107,6 +108,42 @@ const LocationConfig* Response::_getBestMatchLocation(const std::string& uri, co
 	return bestMatch;
 }
 
+// Colapsa "." e ".." de uma URI HTTP (sempre absoluta, começa com "/"),
+// rejeitando qualquer ".." que tente subir acima da raiz — ex:
+// "/../../../../etc/passwd" ou "/files/../../etc/passwd" viram inválidos
+// em vez de escaparem do diretório configurado em `root`. Retorna false
+// quando a URI é uma tentativa de Path Traversal.
+bool Response::_normalizeUri(const std::string& uri, std::string& out) const {
+	std::vector<std::string> segments;
+	bool trailingSlash = !uri.empty() && uri[uri.length() - 1] == '/';
+	size_t pos = 0;
+
+	while (pos <= uri.length()) {
+		size_t next = uri.find('/', pos);
+		std::string segment = (next == std::string::npos) ? uri.substr(pos) : uri.substr(pos, next - pos);
+
+		if (segment == "..") {
+			if (segments.empty()) return false; // tentou subir acima da raiz
+			segments.pop_back();
+		} else if (!segment.empty() && segment != ".") {
+			segments.push_back(segment);
+		}
+
+		if (next == std::string::npos) break;
+		pos = next + 1;
+	}
+
+	out = "/";
+	for (size_t i = 0; i < segments.size(); ++i) {
+		out += segments[i];
+		if (i + 1 < segments.size()) out += "/";
+	}
+	// Preserva a barra final (ex: "/files/") — location e uploadStore
+	// dependem dela pra dar match, e removê-la sempre quebraria isso.
+	if (trailingSlash && out != "/") out += "/";
+	return true;
+}
+
 std::string Response::_getFallbackHTML(int code) const {
 	std::ostringstream oss;
 	std::string msg = "Unknown Error";
@@ -182,6 +219,15 @@ void Response::build(const Request& req, const ServerConfig& config) {
 	if (queryPos != std::string::npos) {
 		cleanUri = cleanUri.substr(0, queryPos);
 	}
+
+	// Path Traversal: normaliza ANTES do matching de location, pra location e
+	// filesystem enxergarem sempre a mesma URI já sem "..".
+	std::string normalizedUri;
+	if (!_normalizeUri(cleanUri, normalizedUri)) {
+		_buildErrorPage(403, config);
+		return;
+	}
+	cleanUri = normalizedUri;
 
 	const LocationConfig* loc = _getBestMatchLocation(cleanUri, config);
 
@@ -338,7 +384,16 @@ void Response::build(const Request& req, const ServerConfig& config) {
 				}
 			}
 		}
-		if (filename.empty()) {
+		// O filename vem do cliente (header Content-Disposition) — nunca pode
+		// conter separador de diretório, senão o upload também vira um Path
+		// Traversal (ex: filename="../../etc/cron.d/x"). Mantém só o último
+		// componente do path.
+		size_t lastSlash = filename.find_last_of('/');
+		if (lastSlash != std::string::npos) {
+			filename = filename.substr(lastSlash + 1);
+		}
+
+		if (filename.empty() || filename == "." || filename == "..") {
 			std::ostringstream oss;
 			oss << "upload_" << time(NULL) << ".bin";
 			filename = oss.str();

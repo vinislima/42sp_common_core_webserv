@@ -40,6 +40,7 @@ private:
     void _generateRawResponse();
     std::string _getContentType(const std::string& path) const;
     const LocationConfig* _getBestMatchLocation(const std::string& uri, const ServerConfig& config) const;
+    bool _normalizeUri(const std::string& uri, std::string& out) const;
     void _buildErrorPage(int code, const ServerConfig& config);
     void _handleCGI(const std::string& filepath, const std::string& cgiPath, const Request& req, const ServerConfig& config);
 
