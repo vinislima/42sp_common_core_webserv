@@ -445,7 +445,8 @@ void Server::_runEventLoop() {
 
                 if (_pollFds[i].revents & (POLLERR | POLLNVAL)) {
                     if (_pollFds[i].fd == client.cgiReadFd) {
-                        waitpid(client.cgiPid, NULL, WNOHANG);
+                        int status = 0;
+                        waitpid(client.cgiPid, &status, WNOHANG);
                         close(client.cgiReadFd);
                         client.cgiReadFd = -1;
                         client.responseBuffer = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
@@ -494,36 +495,51 @@ void Server::_runEventLoop() {
                         }
 
                         if (bytesRead <= 0 || (_pollFds[i].revents & POLLHUP)) {
-                            waitpid(client.cgiPid, NULL, WNOHANG); 
+                            // Bloqueante de propósito: o pipe só dá EOF quando o processo
+                            // filho fecha o stdout, o que acontece na saída dele — logo o
+                            // wait aqui retorna quase instantaneamente. Usar WNOHANG neste
+                            // ponto arriscaria ler status=0 (processo ainda não reapeado)
+                            // e interpretar isso como "saiu com sucesso" por engano.
+                            int status = 0;
+                            waitpid(client.cgiPid, &status, 0);
                             close(_pollFds[i].fd);
                             _cgiToClient.erase(_pollFds[i].fd);
                             _pollFds.erase(_pollFds.begin() + i);
                             client.cgiReadFd = -1;
                             i--;
 
-                            size_t headerEnd = client.cgiOutput.find("\r\n\r\n");
-                            size_t headerSize = 4;
-                            if (headerEnd == std::string::npos) {
-                                headerEnd = client.cgiOutput.find("\n\n");
-                                headerSize = 2;
+                            bool cgiOk = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+
+                            if (!cgiOk) {
+                                std::cerr << "[CGI] Script (PID " << client.cgiPid << ") terminou com falha (status "
+                                           << status << "). Respondendo 500.\n";
+                                client.responseBuffer = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                            } else {
+                                size_t headerEnd = client.cgiOutput.find("\r\n\r\n");
+                                size_t headerSize = 4;
+                                if (headerEnd == std::string::npos) {
+                                    headerEnd = client.cgiOutput.find("\n\n");
+                                    headerSize = 2;
+                                }
+
+                                std::string cgiHeaders = "";
+                                std::string cgiBody = client.cgiOutput;
+
+                                if (headerEnd != std::string::npos) {
+                                    cgiHeaders = client.cgiOutput.substr(0, headerEnd);
+                                    cgiBody = client.cgiOutput.substr(headerEnd + headerSize);
+                                }
+
+                                std::ostringstream responseStream;
+                                responseStream << "HTTP/1.1 200 OK\r\n";
+                                responseStream << "Content-Length: " << cgiBody.length() << "\r\n";
+                                if (!cgiHeaders.empty()) responseStream << cgiHeaders << "\r\n\r\n";
+                                else responseStream << "Content-Type: text/html\r\n\r\n";
+                                responseStream << cgiBody;
+
+                                client.responseBuffer = responseStream.str();
                             }
 
-                            std::string cgiHeaders = "";
-                            std::string cgiBody = client.cgiOutput;
-
-                            if (headerEnd != std::string::npos) {
-                                cgiHeaders = client.cgiOutput.substr(0, headerEnd);
-                                cgiBody = client.cgiOutput.substr(headerEnd + headerSize);
-                            }
-
-                            std::ostringstream responseStream;
-                            responseStream << "HTTP/1.1 200 OK\r\n";
-                            responseStream << "Content-Length: " << cgiBody.length() << "\r\n";
-                            if (!cgiHeaders.empty()) responseStream << cgiHeaders << "\r\n\r\n";
-                            else responseStream << "Content-Type: text/html\r\n\r\n";
-                            responseStream << cgiBody;
-
-                            client.responseBuffer = responseStream.str();
                             client.bytesSent = 0;
                             client.isReadyToSend = true;
                             client.isCgi = false;
