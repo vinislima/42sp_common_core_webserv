@@ -305,9 +305,30 @@ servidor, e que não sobra processo zumbi (`ps aux | grep loop.py` depois de
 
 Com `default.conf` rodando, abra o navegador e a aba **Network**:
 
-- [ ] `http://local.com:8080/` (adicione `local.com` e `meuteste.com` a
-  `/etc/hosts` apontando para `127.0.0.1` para testar os vhosts pelo
-  navegador de verdade) → inspecione request/response headers.
+> **Sem acesso a `/etc/hosts`?** Nas máquinas do campus (`sudo`/edição de
+> `/etc/hosts` bloqueados) dá pra resolver `local.com`/`meuteste.com` sem
+> nenhum acesso de root, direto no navegador:
+>
+> - **Chrome** (recomendado — restringe a resolução só a esses dois nomes,
+>   sem afetar o resto da internet, o que importa pro teste do redirect pro
+>   `google.com` real mais abaixo):
+>   ```bash
+>   google-chrome --user-data-dir="$HOME/.chrome-webserv-test" \
+>     --host-resolver-rules="MAP local.com 127.0.0.1, MAP meuteste.com 127.0.0.1" \
+>     http://local.com:8080/
+>   ```
+>   Use um `--user-data-dir` novo/dedicado: se já existe uma janela do Chrome
+>   aberta, a flag só é lida na criação de um processo novo, então abrir uma
+>   aba na instância já existente a ignora silenciosamente.
+> - **Firefox** (alternativa): `about:config` → criar `network.dns.forceResolve`
+>   (string) = `127.0.0.1`. É uma pref **global** (não dá pra restringir a
+>   hostnames específicos), então desligue-a (apague o valor) antes de testar
+>   o redirect `/google` → `google.com`, senão ele também cai em `127.0.0.1`.
+>
+> Se você tiver `sudo` disponível, o caminho mais simples continua sendo
+> `echo "127.0.0.1 local.com meuteste.com" | sudo tee -a /etc/hosts`.
+
+- [ ] `http://local.com:8080/` → inspecione request/response headers.
 - [ ] Navegue pelo site estático (`www/index.html`); confira que o
   `Content-Type` da resposta é `text/html` (tabela MIME implementada em
   `Response.cpp` cobre `.html/.css/.js/.json/.png/.jpg/...`).
