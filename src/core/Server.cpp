@@ -195,6 +195,19 @@ bool Server::_handleClientRead(int clientFd) {
 void Server::_parseClientRequest(int clientFd) {
     Client& client = _clients[clientFd];
 
+    // Defensive limit: only client_max_body_size caps the body, nothing caps
+    // the request-line/headers. A client that never sends the closing
+    // "\r\n\r\n" (or sends one absurdly large header block) would make
+    // _rawRequest grow forever in memory. Checked BEFORE parsing, so an
+    // oversized block gets rejected even if it does contain a complete
+    // "\r\n\r\n" — headers that large are already unreasonable.
+    const size_t MAX_HEADER_BYTES = 8192;
+    if (!client.req.areHeadersParsed() && client.req.getRawLength() > MAX_HEADER_BYTES) {
+        std::cerr << "[ERRO] Request-line/headers excederam " << MAX_HEADER_BYTES << " bytes. FD: " << clientFd << "\n";
+        client.req.setErrorCode(431);
+        return;
+    }
+
     try {
         if (!client.req.areHeadersParsed()) {
             client.req.parseHeadersOnly();
