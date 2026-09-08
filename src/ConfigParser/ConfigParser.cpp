@@ -104,16 +104,20 @@ void ConfigParser::_buildTree() {
 			if (i >= _tokens.size() || _tokens[i] != "{") {
 				throw std::runtime_error("Erro: Bloco server sem chave de abertura '{'");
 			}
-			i++; 
+			i++;
 			ServerConfig newServer;
-			
+			bool hasListen = false; // ServerConfig defaults to 0.0.0.0:80 when listen is never
+			                        // called; without this flag two "listen"-less server{} blocks
+			                        // would silently collide on that same default instead of erroring.
+
 			while (i < _tokens.size() && _tokens[i] != "}") {
 				if (_tokens[i] == ";") {
-					i++; 
+					i++;
 					continue;
 				}
 				else if (_tokens[i] == "listen") {
 					_parseListen(newServer, i);
+					hasListen = true;
 				}
 				else if (_tokens[i] == "server_name") {
 					_parseServerName(newServer, i);
@@ -122,7 +126,9 @@ void ConfigParser::_buildTree() {
 					_parseErrorPage(newServer, i);
 				}
 				else if (_tokens[i] == "client_max_body_size") {
-					_parseClientMaxBodySize(newServer, i);
+					size_t sizeVal;
+					_parseClientMaxBodySize(sizeVal, i);
+					newServer.setClientMaxBodySize(sizeVal);
 				}
 				else if (_tokens[i] == "root") {
 					std::string rootVal;
@@ -151,6 +157,10 @@ void ConfigParser::_buildTree() {
 			
 			if (i == _tokens.size()) {
 				throw std::runtime_error("Erro: Bloco server sem chave de fechamento '}'");
+			}
+
+			if (!hasListen) {
+				throw std::runtime_error("Erro: Bloco server sem a diretiva 'listen' obrigatoria.");
 			}
 
 			_servers.push_back(newServer);
@@ -232,7 +242,7 @@ void ConfigParser::_parseErrorPage(ServerConfig& server, size_t& i) {
 	}
 }
 
-void ConfigParser::_parseClientMaxBodySize(ServerConfig& server, size_t& i) {
+void ConfigParser::_parseClientMaxBodySize(size_t& outSize, size_t& i) {
 	i++; 
 	if (i >= _tokens.size() || _tokens[i] == ";") {
 		 throw std::runtime_error("Erro: Diretiva client_max_body_size vazia");
@@ -262,8 +272,8 @@ void ConfigParser::_parseClientMaxBodySize(ServerConfig& server, size_t& i) {
 	std::stringstream ss(val);
 	size_t size;
 	ss >> size;
-	server.setClientMaxBodySize(size * multiplier);
-		
+	outSize = size * multiplier;
+
 	i++;
 	if (i >= _tokens.size() || _tokens[i] != ";") {
 		 throw std::runtime_error("Erro: Diretiva client_max_body_size sem ponto e vírgula ';'");
@@ -360,6 +370,11 @@ void ConfigParser::_parseLocation(ServerConfig& server, size_t& i) {
             for (size_t j = 0; j < indexList.size(); ++j) {
                 newLocation.addIndex(indexList[j]);
             }
+        }
+        else if (_tokens[i] == "client_max_body_size") {
+            size_t sizeVal;
+            _parseClientMaxBodySize(sizeVal, i);
+            newLocation.setClientMaxBodySize(sizeVal);
         }
         else if (_tokens[i] == "return") {
             _parseReturn(newLocation, i);

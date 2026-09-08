@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include <cctype>
 #include <vector>
+#include <algorithm>
 
 Response::Response() : _statusCode(200), _cgiPid(-1), _cgiReadFd(-1), _cgiWriteFd(-1), _fileReadFd(-1), _fileWriteFd(-1) {
 	_initStatusMessages();
@@ -43,15 +44,55 @@ void Response::_initStatusMessages() {
 	_statusMessages[404] = "Not Found";
 	_statusMessages[405] = "Method Not Allowed";
 	_statusMessages[413] = "Payload Too Large";
+	_statusMessages[431] = "Request Header Fields Too Large";
 	_statusMessages[500] = "Internal Server Error";
 	_statusMessages[501] = "Not Implemented";
 }
 
 std::string Response::_getContentType(const std::string& path) const {
-	if (path.find(".html") != std::string::npos) return "text/html";
-	if (path.find(".css") != std::string::npos) return "text/css";
-	if (path.find(".png") != std::string::npos) return "image/png";
-	return "text/plain";
+	// A previous version matched by path.find(".html") — a substring search
+	// anywhere in the path, not the actual extension (so "foo.htmlbak" would
+	// also match ".html", and ".HTML" wouldn't match at all). This looks up
+	// the real extension (after the last '/', lowercased) in a proper table.
+	static std::map<std::string, std::string> mimeTypes;
+	if (mimeTypes.empty()) {
+		mimeTypes[".html"] = "text/html";
+		mimeTypes[".htm"] = "text/html";
+		mimeTypes[".css"] = "text/css";
+		mimeTypes[".js"] = "application/javascript";
+		mimeTypes[".json"] = "application/json";
+		mimeTypes[".xml"] = "application/xml";
+		mimeTypes[".txt"] = "text/plain";
+		mimeTypes[".pdf"] = "application/pdf";
+		mimeTypes[".zip"] = "application/zip";
+		mimeTypes[".png"] = "image/png";
+		mimeTypes[".jpg"] = "image/jpeg";
+		mimeTypes[".jpeg"] = "image/jpeg";
+		mimeTypes[".gif"] = "image/gif";
+		mimeTypes[".svg"] = "image/svg+xml";
+		mimeTypes[".ico"] = "image/x-icon";
+		mimeTypes[".webp"] = "image/webp";
+		mimeTypes[".mp4"] = "video/mp4";
+		mimeTypes[".webm"] = "video/webm";
+		mimeTypes[".woff"] = "font/woff";
+		mimeTypes[".woff2"] = "font/woff2";
+		mimeTypes[".ttf"] = "font/ttf";
+	}
+
+	size_t lastSlash = path.find_last_of('/');
+	size_t dotPos = path.find_last_of('.');
+	bool hasExtension = dotPos != std::string::npos && (lastSlash == std::string::npos || dotPos > lastSlash);
+
+	std::string ext;
+	if (hasExtension) {
+		ext = path.substr(dotPos);
+		for (size_t i = 0; i < ext.length(); ++i) {
+			ext[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(ext[i])));
+		}
+	}
+
+	std::map<std::string, std::string>::const_iterator it = mimeTypes.find(ext);
+	return (it != mimeTypes.end()) ? it->second : "text/plain";
 }
 
 void Response::setStatusCode(int code) {
@@ -91,28 +132,11 @@ void Response::_generateRawResponse() {
 	_rawResponse = ss.str();
 }
 
-const LocationConfig* Response::_getBestMatchLocation(const std::string& uri, const ServerConfig& config) const {
-	const LocationConfig* bestMatch = NULL;
-	size_t longestMatchLength = 0;
-		
-	const std::vector<LocationConfig>& location = config.getLocations();
-	for (std::vector<LocationConfig>::const_iterator it = location.begin(); it != location.end(); ++it) {
-		std::string locPath = it->getPath();
-		if (uri.find(locPath) == 0) {
-			if (locPath.length() > longestMatchLength) {
-				longestMatchLength = locPath.length();
-				bestMatch = &(*it);
-			}
-		}
-	}
-	return bestMatch;
-}
-
-// Colapsa "." e ".." de uma URI HTTP (sempre absoluta, começa com "/"),
-// rejeitando qualquer ".." que tente subir acima da raiz — ex:
-// "/../../../../etc/passwd" ou "/files/../../etc/passwd" viram inválidos
-// em vez de escaparem do diretório configurado em `root`. Retorna false
-// quando a URI é uma tentativa de Path Traversal.
+// Collapses "." and ".." from an HTTP URI (always absolute, starts with
+// "/"), rejecting any ".." that tries to go above the root — e.g.
+// "/../../../../etc/passwd" or "/files/../../etc/passwd" become invalid
+// instead of escaping the directory configured in `root`. Returns false
+// when the URI is a Path Traversal attempt.
 bool Response::_normalizeUri(const std::string& uri, std::string& out) const {
 	std::vector<std::string> segments;
 	bool trailingSlash = !uri.empty() && uri[uri.length() - 1] == '/';
@@ -123,7 +147,7 @@ bool Response::_normalizeUri(const std::string& uri, std::string& out) const {
 		std::string segment = (next == std::string::npos) ? uri.substr(pos) : uri.substr(pos, next - pos);
 
 		if (segment == "..") {
-			if (segments.empty()) return false; // tentou subir acima da raiz
+			if (segments.empty()) return false; // tried to go above the root
 			segments.pop_back();
 		} else if (!segment.empty() && segment != ".") {
 			segments.push_back(segment);
@@ -138,17 +162,17 @@ bool Response::_normalizeUri(const std::string& uri, std::string& out) const {
 		out += segments[i];
 		if (i + 1 < segments.size()) out += "/";
 	}
-	// Preserva a barra final (ex: "/files/") — location e uploadStore
-	// dependem dela pra dar match, e removê-la sempre quebraria isso.
+	// Preserve the trailing slash (e.g. "/files/") — location and
+	// uploadStore depend on it to match, and always stripping it would break that.
 	if (trailingSlash && out != "/") out += "/";
 	return true;
 }
 
-// Faz o parse manual de um body multipart/form-data (RFC 7578): acha a
-// primeira parte que tem "filename=" no Content-Disposition (ou seja, é um
-// arquivo, não um campo de formulário comum), separa os headers daquela
-// parte do seu conteúdo binário e devolve os dois. Sem isso, o boundary e
-// os headers de cada parte iam junto pro arquivo salvo em disco.
+// Manually parses a multipart/form-data body (RFC 7578): finds the first
+// part that has "filename=" in its Content-Disposition (i.e. it's a file,
+// not a regular form field), splits that part's headers from its binary
+// content and returns both. Without this, the boundary and each part's
+// headers would end up in the file saved to disk.
 bool Response::_parseMultipart(const std::string& body, const std::string& boundary,
 								std::string& outFilename, std::string& outContent) const {
 	std::string delimiter = "--" + boundary;
@@ -158,7 +182,7 @@ bool Response::_parseMultipart(const std::string& body, const std::string& bound
 	while (pos != std::string::npos) {
 		pos += delimiter.length();
 
-		// "--" logo após o boundary marca o fim do multipart (delimiter final).
+		// "--" right after the boundary marks the end of the multipart (final delimiter).
 		if (body.compare(pos, 2, "--") == 0) break;
 
 		if (body.compare(pos, 2, "\r\n") == 0) pos += 2;
@@ -171,7 +195,7 @@ bool Response::_parseMultipart(const std::string& body, const std::string& bound
 			std::string partHeaders = part.substr(0, headerEnd);
 			std::string content = part.substr(headerEnd + 4);
 
-			// remove o "\r\n" final que antecede o próximo boundary
+			// remove the trailing "\r\n" that precedes the next boundary
 			if (content.length() >= 2 && content.compare(content.length() - 2, 2, "\r\n") == 0) {
 				content = content.substr(0, content.length() - 2);
 			}
@@ -227,12 +251,13 @@ void Response::_buildErrorPage(int code, const ServerConfig& config) {
 		}
 		std::string filepath = root + errorUri;
 		
-		// I/O Assíncrono para página de erro!
+		// Asynchronous I/O for the error page!
 		int fd = open(filepath.c_str(), O_RDONLY);
 		if (fd >= 0) {
 			fcntl(fd, F_SETFL, O_NONBLOCK);
+			fcntl(fd, F_SETFD, FD_CLOEXEC); // don't leak this fd into a future CGI child's fork()+execve()
 			this->_fileReadFd = fd;
-			
+
 			struct stat path_stat;
 			stat(filepath.c_str(), &path_stat);
 			
@@ -266,14 +291,25 @@ void Response::build(Request& req, const ServerConfig& config) {
 
 	setStatusCode(200);
 
+	// 501 vs 405: a method this server never implements at all (PATCH, PUT,
+	// TRACE, ...) is 501 Not Implemented regardless of location/allow_methods
+	// — even a location with no allow_methods restriction (which lets any
+	// method through the isMethodAllowed() check below) can't actually serve
+	// it, since there is no code path for it past this point. 405 is reserved
+	// for a method this server DOES implement but that specific route forbids.
+	if (req.getMethod() != "GET" && req.getMethod() != "POST" && req.getMethod() != "DELETE") {
+		_buildErrorPage(501, config);
+		return;
+	}
+
 	std::string cleanUri = req.getUri();
 	size_t queryPos = cleanUri.find('?');
 	if (queryPos != std::string::npos) {
 		cleanUri = cleanUri.substr(0, queryPos);
 	}
 
-	// Path Traversal: normaliza ANTES do matching de location, pra location e
-	// filesystem enxergarem sempre a mesma URI já sem "..".
+	// Path Traversal: normalize BEFORE location matching, so location and
+	// the filesystem always see the same URI, already stripped of "..".
 	std::string normalizedUri;
 	if (!_normalizeUri(cleanUri, normalizedUri)) {
 		_buildErrorPage(403, config);
@@ -281,9 +317,16 @@ void Response::build(Request& req, const ServerConfig& config) {
 	}
 	cleanUri = normalizedUri;
 
-	const LocationConfig* loc = _getBestMatchLocation(cleanUri, config);
+	const LocationConfig* loc = config.getBestMatchLocation(cleanUri);
 
-	if (loc && !loc->isMethodAllowed(req.getMethod())) {
+	// Without a matching location, the implicit policy is GET-only: a
+	// config can (and default.conf/second.conf/third.conf now do) add a
+	// catch-all `location / { allow_methods GET; }` to cover this, but the
+	// server itself shouldn't rely on every .conf remembering that — a
+	// config missing a root location previously let POST/DELETE through
+	// with no check at all (e.g. DELETE / could remove the site root).
+	bool methodAllowed = loc ? loc->isMethodAllowed(req.getMethod()) : (req.getMethod() == "GET");
+	if (!methodAllowed) {
 		_buildErrorPage(405, config);
 		return;
 	}
@@ -306,7 +349,18 @@ void Response::build(Request& req, const ServerConfig& config) {
 	}
 
 	std::string root = (loc && !loc->getRoot().empty()) ? loc->getRoot() : config.getRoot();
-	bool autoindex = (loc) ? loc->getAutoindex() : config.getAutoindex();
+
+	// autoindex is a bool (no possible "empty" state), so it only inherits
+	// from the server when the location doesn't define the directive at all
+	// (AUTOINDEX_INHERIT) — unlike root/index above, which use "empty" as
+	// the inheritance sentinel.
+	bool autoindex;
+	if (loc && loc->getAutoindexState() != LocationConfig::AUTOINDEX_INHERIT) {
+		autoindex = (loc->getAutoindexState() == LocationConfig::AUTOINDEX_ON);
+	} else {
+		autoindex = config.getAutoindex();
+	}
+
 	std::vector<std::string> indexFiles = (loc && !loc->getIndex().empty()) ? loc->getIndex() : config.getIndex();
 
 	if (root.empty()) {
@@ -348,28 +402,40 @@ void Response::build(Request& req, const ServerConfig& config) {
 				if (autoindex) {
 					DIR* dir = opendir(filepath.c_str());
 					if (dir != NULL) {
-						std::string autoindexHtml = "<!DOCTYPE html><html><head><title>Index of " + req.getUri() + "</title></head>";
-						autoindexHtml += "<body style=\"font-family: monospace; background-color: #282a36; color: #f8f8f2; padding: 20px;\">";
-						autoindexHtml += "<h1 style=\"color: #50fa7b;\">Index of " + req.getUri() + "</h1><hr><ul>";
-						
+						// readdir() returns entries in filesystem/inode order (not
+						// alphabetical) and includes "." and "..". Only "." was being
+						// filtered — ".." was left in, so the listing offered a link
+						// to browse up out of the directory being listed. Collect
+						// names first, filter both, and sort before rendering.
+						std::vector<std::string> entries;
 						struct dirent* entry;
 						while ((entry = readdir(dir)) != NULL) {
 							std::string name = entry->d_name;
-							if (name == ".") continue;
-							
+							if (name == "." || name == "..") continue;
+							entries.push_back(name);
+						}
+						closedir(dir);
+						std::sort(entries.begin(), entries.end());
+
+						std::string autoindexHtml = "<!DOCTYPE html><html><head><title>Index of " + req.getUri() + "</title></head>";
+						autoindexHtml += "<body style=\"font-family: monospace; background-color: #282a36; color: #f8f8f2; padding: 20px;\">";
+						autoindexHtml += "<h1 style=\"color: #50fa7b;\">Index of " + req.getUri() + "</h1><hr><ul>";
+
+						for (size_t idx = 0; idx < entries.size(); ++idx) {
+							std::string name = entries[idx];
+
 							std::string link = req.getUri();
 							if (link[link.length() - 1] != '/') link += "/";
 							link += name;
-							
+
 							std::string fullPath = filepath + "/" + name;
 							struct stat item_stat;
 							if (stat(fullPath.c_str(), &item_stat) == 0 && S_ISDIR(item_stat.st_mode)) {
 								name += "/";
 							}
-							
+
 							autoindexHtml += "<li style=\"margin: 5px 0;\"><a style=\"color: #8be9fd; text-decoration: none; font-size: 1.2rem;\" href=\"" + link + "\">" + name + "</a></li>";
 						}
-						closedir(dir);
 						autoindexHtml += "</ul><hr><p style=\"color: #6272a4;\">Webserv / C++98</p></body></html>";
 						
 						setStatusCode(200);
@@ -391,8 +457,9 @@ void Response::build(Request& req, const ServerConfig& config) {
 		int fd = open(filepath.c_str(), O_RDONLY);
 		if (fd >= 0) {
 			fcntl(fd, F_SETFL, O_NONBLOCK);
+			fcntl(fd, F_SETFD, FD_CLOEXEC); // don't leak this fd into a future CGI child's fork()+execve()
 			this->_fileReadFd = fd;
-			
+
 			struct stat file_stat;
 			stat(filepath.c_str(), &file_stat);
 			
@@ -431,10 +498,10 @@ void Response::build(Request& req, const ServerConfig& config) {
 		size_t boundaryPos = contentType.find("boundary=");
 
 		if (contentType.find("multipart/form-data") != std::string::npos && boundaryPos != std::string::npos) {
-			// Content-Disposition de um upload real (via <form> de navegador,
-			// ou curl -F) vive DENTRO do body, por parte do multipart — nunca
-			// como header HTTP top-level. Fazemos o parse manual do boundary
-			// pra extrair só o conteúdo binário da parte que é o arquivo.
+			// The Content-Disposition of a real upload (via a browser <form>,
+			// or curl -F) lives INSIDE the body, per multipart part — never
+			// as a top-level HTTP header. We manually parse the boundary to
+			// extract just the binary content of the part that is the file.
 			std::string boundary = contentType.substr(boundaryPos + 9);
 			if (!boundary.empty() && boundary[0] == '"') {
 				boundary = boundary.substr(1);
@@ -454,8 +521,8 @@ void Response::build(Request& req, const ServerConfig& config) {
 				return;
 			}
 		} else {
-			// Upload raw (sem multipart), ex: curl -X POST --data-binary @arquivo
-			// com um Content-Disposition mandado manualmente como header top-level.
+			// Raw upload (no multipart), e.g. curl -X POST --data-binary @file
+			// with a Content-Disposition sent manually as a top-level header.
 			std::string contentDisposition = req.getHeader("Content-Disposition");
 			if (!contentDisposition.empty()) {
 				size_t namePos = contentDisposition.find("filename=\"");
@@ -469,9 +536,9 @@ void Response::build(Request& req, const ServerConfig& config) {
 			}
 		}
 
-		// O filename vem do cliente — nunca pode conter separador de
-		// diretório, senão o upload também vira um Path Traversal (ex:
-		// filename="../../etc/cron.d/x"). Mantém só o último componente.
+		// filename comes from the client — it can never contain a directory
+		// separator, otherwise the upload also becomes a Path Traversal (e.g.
+		// filename="../../etc/cron.d/x"). Keep only the last path component.
 		size_t lastSlash = filename.find_last_of('/');
 		if (lastSlash != std::string::npos) {
 			filename = filename.substr(lastSlash + 1);
@@ -483,8 +550,8 @@ void Response::build(Request& req, const ServerConfig& config) {
 			filename = oss.str();
 		}
 
-		// Server.cpp escreve em disco a partir de req.getBody() — precisa ser
-		// atualizado com o conteúdo já sem o envelope do multipart.
+		// Server.cpp writes to disk from req.getBody() — it needs to be
+		// updated with the content already stripped of the multipart envelope.
 		req.setBody(uploadContent);
 
 		std::string fullUploadPath = uploadStore + "/" + filename;
@@ -492,8 +559,9 @@ void Response::build(Request& req, const ServerConfig& config) {
 		int fd = open(fullUploadPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 		if (fd >= 0) {
 			fcntl(fd, F_SETFL, O_NONBLOCK);
+			fcntl(fd, F_SETFD, FD_CLOEXEC); // don't leak this fd into a future CGI child's fork()+execve()
 			this->_fileWriteFd = fd;
-			
+
 			std::string locationHeader = req.getUri();
 			if (locationHeader[locationHeader.length() - 1] != '/') {
 				locationHeader += "/";
@@ -512,7 +580,7 @@ void Response::build(Request& req, const ServerConfig& config) {
 			ss << "Content-Length: " << responseHtml.str().length() << "\r\n";
 			ss << "Content-Type: text/html\r\n\r\n";
 			ss << responseHtml.str();
-			_rawResponse = ss.str(); // Headers + Body de resposta pronto, o Server.cpp envia assim que o HD terminar de gravar.
+			_rawResponse = ss.str(); // Response headers + body ready, Server.cpp sends it once the disk write finishes.
 		} else {
 			std::cout << "[ERRO] Permissao negada ou disco cheio ao gravar em " << fullUploadPath << "\n";
 			_buildErrorPage(500, config);
@@ -533,7 +601,10 @@ void Response::build(Request& req, const ServerConfig& config) {
 		}
 		_generateRawResponse();
 	} else {
-		_buildErrorPage(405, config);
+		// Unreachable: the check at the top of build() already sends any
+		// method other than GET/POST/DELETE to 501. Kept as a defensive
+		// fallback with the semantically correct code, not 405.
+		_buildErrorPage(501, config);
 		return;
 	}
 }
@@ -650,7 +721,14 @@ void Response::_handleCGI(const std::string& filepath, const std::string& cgiPat
 		close(pipeOut[1]);
 		fcntl(pipeIn[1], F_SETFL, O_NONBLOCK);
 		fcntl(pipeOut[0], F_SETFL, O_NONBLOCK);
-		
+		// Don't leak these into a DIFFERENT CGI's fork()+execve() while this
+		// one is still running (concurrent clients each with their own CGI).
+		// dup2() in the child always clears FD_CLOEXEC on the resulting fd
+		// regardless of the source, so this has no effect on this CGI's own
+		// STDIN/STDOUT — only on fds inherited by an unrelated future child.
+		fcntl(pipeIn[1], F_SETFD, FD_CLOEXEC);
+		fcntl(pipeOut[0], F_SETFD, FD_CLOEXEC);
+
 		this->_cgiPid = pid;
 		this->_cgiWriteFd = pipeIn[1];
 		this->_cgiReadFd = pipeOut[0];
