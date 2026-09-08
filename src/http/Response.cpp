@@ -319,7 +319,14 @@ void Response::build(Request& req, const ServerConfig& config) {
 
 	const LocationConfig* loc = config.getBestMatchLocation(cleanUri);
 
-	if (loc && !loc->isMethodAllowed(req.getMethod())) {
+	// Without a matching location, the implicit policy is GET-only: a
+	// config can (and default.conf/second.conf/third.conf now do) add a
+	// catch-all `location / { allow_methods GET; }` to cover this, but the
+	// server itself shouldn't rely on every .conf remembering that — a
+	// config missing a root location previously let POST/DELETE through
+	// with no check at all (e.g. DELETE / could remove the site root).
+	bool methodAllowed = loc ? loc->isMethodAllowed(req.getMethod()) : (req.getMethod() == "GET");
+	if (!methodAllowed) {
 		_buildErrorPage(405, config);
 		return;
 	}
