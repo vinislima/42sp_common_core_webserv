@@ -558,18 +558,31 @@ void Server::_runEventLoop() {
 						ssize_t bytesRead = read(_pollFds[i].fd, buffer, sizeof(buffer) - 1);
 						
 						if (bytesRead > 0) {
-							buffer[bytesRead] = '\0';
-							client.cgiOutput += buffer;
+							// append(ptr, len), not operator+=(const char*): the CGI can
+							// legitimately output binary data (e.g. an image) containing
+							// embedded '\0' bytes, which would silently truncate the
+							// output if appended as a C-string via strlen().
+							client.cgiOutput.append(buffer, bytesRead);
 						}
 
 						if (bytesRead <= 0 || (_pollFds[i].revents & POLLHUP)) {
-							// Blocking on purpose: the pipe only gives EOF once the child
-							// process closes stdout, which happens when it exits — so the
-							// wait here returns almost instantly. Using WNOHANG at this
-							// point would risk reading status=0 (process not yet reaped)
-							// and mistaking that for "exited successfully".
+							// EOF on the pipe means the child closed stdout — which
+							// USUALLY happens at exit, but not always (e.g. a script
+							// that closes fd 1 explicitly and keeps running, or
+							// daemonizes). A plain blocking waitpid() here would freeze
+							// the ENTIRE event loop — every other client too — for as
+							// long as that process stays alive: reproduced live, it
+							// blocks the whole server, not just this one request.
+							// Try a non-blocking reap first; if the child hasn't
+							// actually exited yet, force it (it already gave up its
+							// output, so there is nothing left to wait for) and THEN
+							// block — bounded this time, since SIGKILL guarantees the
+							// process dies almost immediately.
 							int status = 0;
-							waitpid(client.cgiPid, &status, 0);
+							if (waitpid(client.cgiPid, &status, WNOHANG) == 0) {
+								kill(client.cgiPid, SIGKILL);
+								waitpid(client.cgiPid, &status, 0);
+							}
 							close(_pollFds[i].fd);
 							_cgiToClient.erase(_pollFds[i].fd);
 							_pollFds.erase(_pollFds.begin() + i);

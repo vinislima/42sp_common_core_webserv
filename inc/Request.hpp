@@ -42,7 +42,6 @@ private:
 
 public:
 	Request();
-	Request(const std::string& rawRequest);
 	Request(const Request& src);
 	Request& operator=(const Request& rhs);
 	~Request();

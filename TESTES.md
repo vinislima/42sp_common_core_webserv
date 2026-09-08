@@ -229,12 +229,16 @@ continua de pé** — confira no terminal 1 que o processo não morreu, e mande
 outro GET normal em seguida.
 
 Teste também path traversal (deve ser bloqueado, não vazar arquivos fora do
-`root`):
+`root`). **Importante:** sem `--path-as-is`, o próprio `curl` colapsa o `..`
+no lado do cliente antes de enviar (`/../../../../etc/passwd` vira
+`GET /etc/passwd` na prática) — isso testaria o cliente, não o servidor.
+Com a flag, o `..` cru vai na requisição de verdade:
 ```bash
-$2 curl -i -H "Host: local.com" "http://localhost:8080/../../../../etc/passwd"
-$2 curl -i -H "Host: local.com" "http://localhost:8080/files/../../etc/passwd"
+$2 curl -i --path-as-is -H "Host: local.com" "http://localhost:8080/../../../../etc/passwd"
+$2 curl -i --path-as-is -H "Host: local.com" "http://localhost:8080/files/../../etc/passwd"
 ```
-Esperado: erro (400/403/404), nunca o conteúdo de `/etc/passwd`.
+Esperado: `403 Forbidden` nos dois (`Response::_normalizeUri` rejeita
+qualquer `..` que suba acima do `root`), nunca o conteúdo de `/etc/passwd`.
 
 ---
 

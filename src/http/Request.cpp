@@ -26,7 +26,6 @@ static std::string toLowerCopy(const std::string& s) {
 }
 
 Request::Request() : _isComplete(false), _headersParsed(false), _bodyAuthorized(false), _maxBodySize(0), _errorCode(0), _consumedBytes(0), _bodyBytesConsumed(0) {}
-Request::Request(const std::string& rawRequest) : _rawRequest(rawRequest), _isComplete(false) {}
 Request::Request(const Request& src) { *this = src; }
 Request& Request::operator=(const Request& rhs) {
 	if (this != &rhs) {
