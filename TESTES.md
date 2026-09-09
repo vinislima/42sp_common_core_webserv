@@ -161,6 +161,11 @@ $2 curl -X POST -i -H "Content-Type: plain/text" --data "corpo maior que vinte b
 adicione a diretiva dentro de um bloco `location` e repita o teste apontando
 para essa rota.
 
+> `second.conf` não tinha `upload_store`/`allow_methods` em `/files/` até
+> pouco tempo atrás — a 1ª chamada acima devolvia `403` em vez de aceitar o
+> corpo curto. Corrigido; confirmado ao vivo que o fluxo acima funciona como
+> descrito.
+
 ### 3.5 Rotas para diretórios diferentes
 ```bash
 $2 curl -i -H "Host: local.com" http://localhost:8080/           # root ./www
@@ -214,6 +219,14 @@ $2 curl -i -H "Host: local.com" http://localhost:8080/files/meu_teste.txt       
 $2 curl -X DELETE -i -H "Host: local.com" http://localhost:8080/files/meu_teste.txt             # DELETE -> 200/204
 $2 curl -i -H "Host: local.com" http://localhost:8080/files/meu_teste.txt                       # GET de novo -> 404 (arquivo removido)
 ```
+
+> Esse exato `POST --data "..." /files/meu_teste.txt` (upload cru, sem
+> `Content-Disposition`) salvava sempre com um nome aleatório
+> (`upload_<timestamp>.bin`), ignorando `meu_teste.txt` da URL — o
+> GET/DELETE seguintes nunca encontravam o arquivo de verdade. Corrigido:
+> sem `Content-Disposition`/multipart, o servidor usa o último segmento da
+> URL como nome do arquivo. Confirmado ao vivo que a sequência acima
+> funciona ponta a ponta.
 
 Requisição desconhecida/malformada (não pode derrubar o servidor):
 ```bash
@@ -302,6 +315,41 @@ erro interno do servidor) e não fica pendurada para sempre. Confirme
 observando o log `[TIMEOUT] CGI (PID ...) excedeu 10s...` no terminal do
 servidor, e que não sobra processo zumbi (`ps aux | grep loop.py` depois de
 ~15s não deve mostrar nada).
+
+### 5.6 CGI que fecha `stdout` mas continua vivo (não pode travar o servidor inteiro)
+
+Cenário diferente do 5.5: aqui o script **fecha o pipe** (o servidor vê EOF
+na hora), mas o **processo continua rodando** — daemoniza, ou só demora pra
+sair. Isso não passa pelo timeout de 10s da seção 5.5 (que só se aplica
+enquanto o pipe segue aberto); sem um cuidado extra, o `waitpid()`
+disparado no EOF ficaria bloqueado pelo tempo que o processo levasse pra
+morrer de verdade — e como só existe **um** `_runEventLoop()`, isso trava
+o servidor inteiro, não só essa requisição.
+
+```python
+#!/usr/bin/env python3
+import sys, os, time
+print("Content-Type: text/html\r\n\r\n", end="")
+print("hello, fechando stdout mas continuando vivo")
+sys.stdout.flush()
+os.close(1)   # EOF no pipe do servidor, processo continua rodando
+time.sleep(8)
+```
+```bash
+$2 chmod +x www/scripts/close_stdout.py
+$2 time curl -i -H "Host: local.com" http://localhost:8080/scripts/close_stdout.py
+# em outro terminal, ao MESMO TEMPO, confirme que o resto do site nao trava:
+$2 curl -i -H "Host: local.com" http://localhost:8080/
+```
+Esperado: a resposta do CGI chega em **~0.1s** (não os 8s do `sleep`, e o
+GET normal disparado em paralelo responde imediatamente, sem esperar).
+A resposta vem `500 Internal Server Error` com corpo vazio — **não** `200`
+— porque o processo foi encerrado à força (`SIGKILL`), então
+`WIFEXITED(status)` é falso e a checagem de crash da seção 5.4 descarta o
+output que já tinha sido impresso antes do `os.close(1)`. Isso é o
+comportamento correto: o servidor não pode confiar que um processo que não
+terminou de verdade "deu certo". Confirme com `ps aux | grep close_stdout.py`
+que não sobra processo, e apague o script depois (não faz parte da entrega).
 
 ---
 
@@ -487,8 +535,8 @@ Verificado neste repositório:
 - [ ] GET/POST/DELETE ok, método desconhecido -> 501 (não derruba o
   servidor), status corretos, upload+retrieve, sem path traversal (seção 4)
 - [ ] CGI GET/POST, diretório correto, erro do script -> 500 sem crash,
-  loop infinito -> timeout de 10s mata o processo e libera o cliente
-  (seção 5)
+  loop infinito -> timeout de 10s mata o processo e libera o cliente,
+  fecha stdout mas continua vivo -> não trava o servidor inteiro (seção 5)
 - [ ] Navegador: estático (com Content-Type correto), 404, listagem,
   redirect, virtual host (seção 6)
 - [ ] Portas: múltiplas interfaces, vhost mesma interface:porta, bind
