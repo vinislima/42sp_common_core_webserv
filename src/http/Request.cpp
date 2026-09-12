@@ -13,10 +13,7 @@
 #include "../../inc/Request.hpp"
 #include <cctype>
 
-// RFC 7230: HTTP header names are case-insensitive ("Host" == "host" ==
-// "HOST"). We normalize to lowercase both when storing and when looking up,
-// otherwise a client sending "host:" lowercase (or any other casing) would
-// never match the getHeader("Host") calls scattered through the code.
+/// @brief Lower-cases a copy of `s`, used to make header names case-insensitive per RFC 7230.
 static std::string toLowerCopy(const std::string& s) {
 	std::string result = s;
 	for (size_t i = 0; i < result.length(); ++i) {
@@ -60,9 +57,7 @@ void Request::parseHeadersOnly() {
 	_parseRequestLine(_rawRequest.substr(0, endOfFirstLine));
 	_parseHeaders(_rawRequest.substr(endOfFirstLine + 2, endOfHeaders - (endOfFirstLine + 2)));
 
-	// RFC 7230 §5.4: Host is mandatory in HTTP/1.1 (it predates virtual
-	// hosting in HTTP/1.0, where it stays optional). A request claiming to
-	// be HTTP/1.1 without one is malformed.
+	// Host is mandatory in HTTP/1.1 (RFC 7230 §5.4), optional in HTTP/1.0.
 	if (_version == "HTTP/1.1" && getHeader("Host").empty()) {
 		setErrorCode(400);
 		return;
@@ -75,11 +70,9 @@ void Request::parseBodyOnly() {
 	size_t endOfHeaders = _rawRequest.find("\r\n\r\n");
 	size_t startOfBody = endOfHeaders + 4;
 
-	// GET/DELETE (or any request without Content-Length/chunked) has no
-	// body — must finish here WITHOUT trying to consume whatever comes
-	// after the headers, otherwise on Keep-Alive/pipelining this would eat
-	// the bytes of the NEXT already-buffered request, treating them as
-	// this one's body.
+	// A GET/DELETE (or any request with neither Content-Length nor chunked
+	// Transfer-Encoding) has no body: finish here without touching bytes
+	// past the header block, since those may belong to a pipelined next request.
 	bool noBodyExpected = (_method == "GET" || _method == "DELETE") ||
 			(getHeader("Content-Length").empty() && getHeader("Transfer-Encoding") != "chunked");
 
@@ -110,9 +103,7 @@ void Request::_parseRequestLine(const std::string& line) {
 	std::stringstream ss(line);
 	ss >> _method >> _uri >> _version;
 
-	// Must have exactly 3 tokens (method, URI, version) — a request-line
-	// with fewer leaves the missing field(s) empty (operator>> on a string
-	// sets it to "" on extraction failure), and one with more is caught below.
+	// A request-line must have exactly 3 tokens: method, URI, version.
 	if (_method.empty() || _uri.empty() || _version.empty()) {
 		throw std::runtime_error("Invalid Request-Line: expected 3 tokens (method, URI, version)");
 	}
@@ -188,11 +179,10 @@ void Request::_parseChunkedBody(const std::string& bodyBlock) {
 		size_t chunkDataStart = endOfLine + 2;
 
 		if (chunkSize == 0) {
-			// Terminating chunk ("0\r\n"): still need to consume the final
-			// "\r\n" that closes the chunked body (trailers, if any, are
-			// ignored). Without this, those bytes would be "lost" in the
-			// middle of the buffer and would corrupt Keep-Alive pipelining
-			// of the next request.
+			// Terminating chunk ("0\r\n"): also consume the final "\r\n" that
+			// closes the chunked body (any trailers are ignored), so
+			// _bodyBytesConsumed correctly marks where the next pipelined
+			// request (if any) begins.
 			size_t terminatorEnd = bodyBlock.find("\r\n", chunkDataStart);
 			if (terminatorEnd == std::string::npos) {
 				throw std::runtime_error("Chunk incompleto");
@@ -236,9 +226,8 @@ std::string Request::extractLeftoverRaw() const {
 }
 
 bool Request::wantsKeepAlive() const {
-	// Grave parsing error (malformed -> 400, body too large -> 413): we
-	// can't trust _consumedBytes to find the boundary of the next request,
-	// so close the connection to be safe.
+	// A parsing error means _consumedBytes can't be trusted to mark the
+	// boundary of a next request, so always close the connection here.
 	if (_errorCode != 0) return false;
 
 	std::string connection = toLowerCopy(getHeader("Connection"));

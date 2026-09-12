@@ -6,13 +6,13 @@
 /*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/09/06 12:06:41 by yvieira-          #+#    #+#             */
-/*   Updated: 2026/09/07 17:41:28 by vinda-si         ###   ########.fr       */
+/*   Updated: 2026/09/12 18:58:06 by vinda-si         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "../../inc/Server.hpp"
 #include "../../inc/Request.hpp"
-#include "../../inc/Response.hpp" 
+#include "../../inc/Response.hpp"
 
 #include <sys/wait.h>
 #include <cstdlib>
@@ -166,8 +166,8 @@ const ServerConfig* Server::_matchConfig(int clientFd, const std::string& hostHe
 		}
 	}
 
-	// No server_name matched: fall back to the first server{} listening on
-	// that port (default "default server" per-port behavior, same as nginx).
+	// No server_name matched this Host header: fall back to the first
+	// server{} listening on that port, same as nginx's default server.
 	return firstOnPort ? firstOnPort : defaultConfig;
 }
 
@@ -187,20 +187,17 @@ bool Server::_handleClientRead(int clientFd) {
 	return true;
 }
 
-// Extracted from _handleClientRead so it can be reused by the Keep-Alive
-// reset: when a 2nd request already arrived pipelined (together with the
-// 1st, in the same recv()), its bytes are already in the buffer without a
-// new recv() happening — so this parsing needs to be callable again
-// without depending on another read event on the socket.
+// Parses whatever is currently buffered for clientFd. Kept separate from
+// _handleClientRead() so it can also be called right after a Keep-Alive
+// reset, when a pipelined 2nd request's bytes are already sitting in the
+// buffer without a new recv() (and therefore no new poll() event) happening.
 void Server::_parseClientRequest(int clientFd) {
 	Client& client = _clients[clientFd];
 
-	// Defensive limit: only client_max_body_size caps the body, nothing caps
-	// the request-line/headers. A client that never sends the closing
-	// "\r\n\r\n" (or sends one absurdly large header block) would make
-	// _rawRequest grow forever in memory. Checked BEFORE parsing, so an
-	// oversized block gets rejected even if it does contain a complete
-	// "\r\n\r\n" — headers that large are already unreasonable.
+	// client_max_body_size only caps the body; nothing else stops a client
+	// that never sends the closing "\r\n\r\n" from growing _rawRequest
+	// forever, so the header block itself is capped defensively here,
+	// before parsing, independent of whatever it currently contains.
 	const size_t MAX_HEADER_BYTES = 8192;
 	if (!client.req.areHeadersParsed() && client.req.getRawLength() > MAX_HEADER_BYTES) {
 		std::cerr << "[ERRO] Request-line/headers excederam " << MAX_HEADER_BYTES << " bytes. FD: " << clientFd << "\n";
@@ -224,10 +221,8 @@ void Server::_parseClientRequest(int clientFd) {
 				size_t maxBodySize = matchedConfig->getClientMaxBodySize();
 
 				// A location can override client_max_body_size for its own
-				// route. The body hasn't arrived yet at this point, but the
-				// URI (and query string) already have — strip the query
-				// string the same way Response::build() does before
-				// matching, so both agree on which location applies.
+				// route; strip the query string the same way Response::build()
+				// does before matching, so both agree on which location applies.
 				std::string uriForMatch = client.req.getUri();
 				size_t queryPos = uriForMatch.find('?');
 				if (queryPos != std::string::npos) {
@@ -282,10 +277,9 @@ bool Server::_handleClientWrite(int clientFd) {
 				const ServerConfig* matchedConfig = _matchConfig(clientFd, hostHeader);
 
 				res.build(client.req, *matchedConfig);
-				
-				// ==============================================================
-				// CGI INTERCEPTOR
-				// ==============================================================
+
+				// The response resolved to a CGI script: hand its pipes off
+				// to poll() instead of sending a response now.
 				if (res.getCgiPid() != -1) {
 					client.isCgi = true;
 					client.cgiPid = res.getCgiPid();
@@ -322,17 +316,17 @@ bool Server::_handleClientWrite(int clientFd) {
 					}
 					return true;
 				}
-				// ==============================================================
-				// FILE INTERCEPTOR (ASYNCHRONOUS DISK I/O)
-				// ==============================================================
+				// The response resolved to an asynchronous disk read or write
+				// (static file, error page, or upload): hand its fd off to
+				// poll() the same way, instead of finishing the response now.
 				else if (res.getFileReadFd() != -1 || res.getFileWriteFd() != -1) {
 					client.isFile = true;
 					client.fileReadFd = res.getFileReadFd();
 					client.fileWriteFd = res.getFileWriteFd();
 					client.fileBytesWritten = 0;
-					
-					// Puts the headers in the buffer, the file body will arrive via poll()
-					client.responseBuffer = res.getRawResponse(); 
+
+					// Headers go in the buffer now; the body (for a read) is appended as it arrives via poll().
+					client.responseBuffer = res.getRawResponse();
 
 					if (client.fileReadFd != -1) {
 						struct pollfd pfdRead;
@@ -359,9 +353,9 @@ bool Server::_handleClientWrite(int clientFd) {
 					}
 					return true;
 				}
-				// ==============================================================
-				// NORMAL FLOW (In-memory pages, Errors, Redirects)
-				// ==============================================================
+				// Everything else (in-memory pages, redirects, error pages
+				// without a custom body on disk): the response is already
+				// fully built, ready to send as-is.
 				else {
 					client.responseBuffer = res.getRawResponse();
 					client.bytesSent = 0;
@@ -387,13 +381,12 @@ bool Server::_handleClientWrite(int clientFd) {
 					std::cout << "[HTTP] Resposta completa enviada com sucesso ao FD " << clientFd << "\n";
 
 					if (!client.req.wantsKeepAlive()) {
-						return false; // HTTP/1.0 default, explicit Connection: close, or grave parsing error
+						return false;
 					}
 
-					// Keep-Alive: reset the Client's state to accept a new
-					// request on the SAME TCP connection, preserving any byte
-					// that already arrived pipelined (2nd request sent by the
-					// client without waiting for the 1st response).
+					// Keep-Alive: reset the Client to accept a new request on
+					// the same TCP connection, carrying over any bytes of a
+					// pipelined next request that already arrived.
 					std::string leftover = client.req.extractLeftoverRaw();
 					client = Client();
 					client.updateActivity();
@@ -427,9 +420,10 @@ void Server::_checkTimeouts() {
 		size_t idx = i - 1;
 		int fd = _pollFds[idx].fd;
 
-		// Skip timeout so we don't drop File I/O or a running CGI
+		// Listen sockets, CGI pipes and file I/O fds are never idle
+		// connections in the sense this timeout cares about.
 		if (_isListenSocket(fd) || _cgiToClient.find(fd) != _cgiToClient.end() || _fileToClient.find(fd) != _fileToClient.end()) {
-			continue; 
+			continue;
 		}
 
 		if (_clients.find(fd) != _clients.end()) {
@@ -442,10 +436,9 @@ void Server::_checkTimeouts() {
 	}
 }
 
-// A stuck CGI (e.g. a script in an infinite loop) can't be left hanging
-// forever: unlike the idle timeout above, here the client is "active"
-// (waiting for the CGI to respond), so it needs its own limit based on how
-// long the child process has been running.
+// Separate from _checkTimeouts(): a client waiting on a CGI is "active", not
+// idle, so a stuck script (e.g. an infinite loop) needs its own limit based
+// on how long the child process itself has been running.
 void Server::_checkCgiTimeouts() {
 	time_t now = time(NULL);
 	const double CGI_TIMEOUT_SECONDS = 10.0;
@@ -500,9 +493,8 @@ void Server::_runEventLoop() {
 		for (size_t i = 0; i < _pollFds.size(); ++i) {
 			if (_pollFds[i].revents == 0) continue;
 
-			// =================================================================
-			// 1. HANDLING CGI PIPES (Asynchronous Processing)
-			// =================================================================
+			// 1. CGI pipes: this fd is either the CGI's stdin (writing the
+			// request body to it) or its stdout (reading its response).
 			if (_cgiToClient.find(_pollFds[i].fd) != _cgiToClient.end()) {
 				int clientFd = _cgiToClient[_pollFds[i].fd];
 				Client& client = _clients[clientFd];
@@ -528,10 +520,8 @@ void Server::_runEventLoop() {
 
 				if (_pollFds[i].fd == client.cgiWriteFd) {
 					if (_pollFds[i].revents & (POLLOUT | POLLHUP)) {
-						// Reference, not a copy: getBody() used to copy the whole
-						// body on every single POLLOUT event, turning a POST with
-						// a large body into O(n^2) work (a full-body copy per
-						// 4-8KB chunk written).
+						// getBody() returns by reference, so this doesn't copy
+						// the whole body again on every POLLOUT event.
 						const std::string& body = client.req.getBody();
 						size_t remaining = body.length() - client.cgiBytesWritten;
 						ssize_t sent = 0;
@@ -563,11 +553,8 @@ void Server::_runEventLoop() {
 						}
 
 						if (bytesRead <= 0 || (_pollFds[i].revents & POLLHUP)) {
-							// Blocking on purpose: the pipe only gives EOF once the child
-							// process closes stdout, which happens when it exits — so the
-							// wait here returns almost instantly. Using WNOHANG at this
-							// point would risk reading status=0 (process not yet reaped)
-							// and mistaking that for "exited successfully".
+							// Reaps the CGI child now that its stdout pipe has
+							// reached EOF, retrieving its exit status.
 							int status = 0;
 							waitpid(client.cgiPid, &status, 0);
 							close(_pollFds[i].fd);
@@ -620,10 +607,10 @@ void Server::_runEventLoop() {
 					continue;
 				}
 			}
-			
-			// =================================================================
-			// 2. HANDLING DISK FILES (Asynchronous I/O)
-			// =================================================================
+
+			// 2. Asynchronous disk I/O: this fd is either a file being read
+			// back to the client (GET / error page) or written from the
+			// request body (POST upload).
 			if (_fileToClient.find(_pollFds[i].fd) != _fileToClient.end()) {
 				int clientFd = _fileToClient[_pollFds[i].fd];
 				Client& client = _clients[clientFd];
@@ -644,16 +631,17 @@ void Server::_runEventLoop() {
 					continue;
 				}
 
-				// Reading from disk (GET or Error Pages)
+				// Reading from disk (GET or error page): append each chunk to
+				// the response buffer as it arrives.
 				if (_pollFds[i].fd == client.fileReadFd && (_pollFds[i].revents & POLLIN)) {
-					char buffer[8192]; // Reads in chunks
+					char buffer[8192];
 					ssize_t bytesRead = read(_pollFds[i].fd, buffer, sizeof(buffer));
-					
+
 					if (bytesRead > 0) {
 						client.responseBuffer.append(buffer, bytesRead);
 					}
-					
-					if (bytesRead <= 0) { // EOF (Read complete)
+
+					if (bytesRead <= 0) { // EOF: the whole file has been read
 						close(_pollFds[i].fd);
 						_fileToClient.erase(_pollFds[i].fd);
 						_pollFds.erase(_pollFds.begin() + i);
@@ -670,9 +658,9 @@ void Server::_runEventLoop() {
 					continue;
 				}
 
-				// Writing to disk (POST Upload)
+				// Writing to disk (POST upload): same reasoning as the CGI
+				// write above for using a reference to avoid copying the body.
 				if (_pollFds[i].fd == client.fileWriteFd && (_pollFds[i].revents & POLLOUT)) {
-					// Reference, not a copy — same reasoning as the CGI write above.
 					const std::string& body = client.req.getBody();
 					size_t remaining = body.length() - client.fileBytesWritten;
 					ssize_t bytesWritten = write(_pollFds[i].fd, body.c_str() + client.fileBytesWritten, remaining);
@@ -687,7 +675,7 @@ void Server::_runEventLoop() {
 						_pollFds.erase(_pollFds.begin() + i);
 						client.fileWriteFd = -1;
 						client.isFile = false;
-						client.isReadyToSend = true; // The 201 success header was already placed there by _handleClientWrite
+						client.isReadyToSend = true; // responseBuffer already holds the 201 response built by _handleClientWrite()
 						client.bytesSent = 0;
 						
 						for (size_t k = 0; k < _pollFds.size(); ++k) {
@@ -699,9 +687,8 @@ void Server::_runEventLoop() {
 				}
 			}
 
-			// =================================================================
-			// 3. NORMAL CLIENT AND NETWORK HANDLING
-			// =================================================================
+			// 3. Plain client sockets: new connections, incoming request
+			// bytes, and outgoing response bytes.
 			if (_pollFds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
 				std::cout << "[REDE] Erro/HUP no cliente. FD: " << _pollFds[i].fd << "\n";
 				_closeClient(_pollFds[i].fd, i);

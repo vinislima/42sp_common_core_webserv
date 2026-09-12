@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   ServerConfig.hpp                                   :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: yvieira- <yvieira-@student.42.fr>          +#+  +:+       +#+        */
+/*   By: vinda-si <vinda-si@student.42sp.org.br>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2026/09/06 12:06:28 by yvieira-          #+#    #+#             */
-/*   Updated: 2026/09/06 12:06:29 by yvieira-         ###   ########.fr       */
+/*   Updated: 2026/09/12 18:57:51 by vinda-si         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -18,8 +18,19 @@
 #include <iostream>
 #include <map>
 
-#include "LocationConfig.hpp" 
+#include "LocationConfig.hpp"
 
+/**
+ * @class ServerConfig
+ * @brief Configuration for a single "server { ... }" block in the .conf file.
+ *
+ * Holds everything declared directly inside a server block (listen
+ * address/port, server_name aliases, error_page map, root, autoindex,
+ * index files, client_max_body_size) plus the list of nested
+ * LocationConfig route overrides. Server.cpp picks the right ServerConfig
+ * for an incoming connection by matching listen port + Host header, then
+ * resolves per-request overrides through getBestMatchLocation().
+ */
 class ServerConfig {
 private:
 	std::string					_host;
@@ -61,10 +72,18 @@ public:
 	std::vector<std::string>	getIndex() const;
 	const std::vector<LocationConfig>& getLocations() const;
 
-	// Longest-prefix match, same as nginx. Moved here (from Response, where
-	// it originally lived) so Server.cpp can also resolve the location for a
-	// URI — needed to apply a per-location client_max_body_size before the
-	// body even starts arriving, not just once Response::build() runs.
+	/**
+	 * @brief Finds the location whose path is the longest prefix match of `uri`.
+	 *
+	 * Same rule nginx uses for prefix locations: among every LocationConfig
+	 * whose path is a prefix of `uri`, the one with the longest path wins.
+	 * Used both by Response::build() (to resolve root/index/CGI/redirects
+	 * for the final response) and by Server::_parseClientRequest() (to
+	 * resolve a per-location client_max_body_size before the request body
+	 * has even fully arrived).
+	 * @param uri The request URI (query string already stripped), to match against each location's path.
+	 * @return The best-matching LocationConfig, or NULL if no location's path prefixes `uri`.
+	 */
 	const LocationConfig* getBestMatchLocation(const std::string& uri) const;
 };
 

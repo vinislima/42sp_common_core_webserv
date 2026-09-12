@@ -106,9 +106,7 @@ void ConfigParser::_buildTree() {
 			}
 			i++;
 			ServerConfig newServer;
-			bool hasListen = false; // ServerConfig defaults to 0.0.0.0:80 when listen is never
-			                        // called; without this flag two "listen"-less server{} blocks
-			                        // would silently collide on that same default instead of erroring.
+			bool hasListen = false; // tracks whether this block ever had a "listen" directive, which is mandatory
 
 			while (i < _tokens.size() && _tokens[i] != "}") {
 				if (_tokens[i] == ";") {
@@ -401,8 +399,6 @@ void ConfigParser::_parseLocation(ServerConfig& server, size_t& i) {
             i++;
             if (i >= _tokens.size() || _tokens[i] != ";") throw std::runtime_error("Erro: Diretiva cgi_pass sem ponto e virgula ';'");
         }
-		
-        // ==========================================
         else {
             throw std::runtime_error("Erro de Sintaxe: Diretiva desconhecida no bloco location: '" + _tokens[i] + "'");
         }
